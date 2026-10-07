@@ -339,6 +339,9 @@ router.all(
     let data: z.infer<typeof ProxyDataSchema> | undefined;
     let clientIp: string | undefined;
     let session: ReturnType<typeof streamRegistry.open> | undefined;
+    let playbackBytes = 0;
+    let playbackOutcome = 'completed';
+    let playbackErrorCode: string | undefined;
 
     try {
       const {
@@ -503,6 +506,22 @@ router.all(
         return;
       }
       const upstreamDuration = getTimeTakenSincePoint(upstreamStartTime);
+      if (session?.ok) {
+        logger.info(
+          {
+            event: 'playback_upstream_response',
+            session_id: session.handle.sessionId,
+            request_id: requestId,
+            username: auth.username,
+            transport: 'proxy',
+            upstream_host: new URL(currentUrl).hostname,
+            upstream_status: upstreamResponse.statusCode,
+            upstream_duration_ms: Date.now() - upstreamStartTime,
+            range_start: rangeStart(req.headers.range),
+          },
+          'playback upstream response'
+        );
+      }
 
       // forward upstream response to client
       res.set(sanitiseHeaders(upstreamResponse.headers));
@@ -510,6 +529,9 @@ router.all(
         res.set(data.responseHeaders);
       }
       res.status(upstreamResponse.statusCode);
+      if (session?.ok) {
+        res.setHeader('X-JJstreams-Playback-Session', session.handle.sessionId);
+      }
 
       logger.debug(`[${requestId}] Serving upstream response`, {
         username: auth.username,
@@ -568,6 +590,7 @@ router.all(
           const handle = session.handle;
           const counter = new Transform({
             transform(chunk, _enc, cb) {
+              playbackBytes += chunk.length;
               handle.addBytes(chunk.length);
               cb(null, chunk);
             },
@@ -582,6 +605,8 @@ router.all(
         username: auth.username,
       });
     } catch (error) {
+      playbackOutcome = 'request_failed';
+      playbackErrorCode = (error as NodeJS.ErrnoException)?.code;
       if (error instanceof APIError) {
         if (!res.headersSent) {
           next(error);
@@ -613,6 +638,9 @@ router.all(
         (error as Error)?.message?.includes('aborted') ||
         (error as Error)?.message?.includes('destroyed');
 
+      playbackOutcome = isClientDisconnect
+        ? 'connection_closed'
+        : 'upstream_error';
       if (!isClientDisconnect) {
         logger.error(`[${requestId}] Proxy request failed`, {
           error: error instanceof Error ? error.message : String(error),
@@ -637,6 +665,23 @@ router.all(
         });
       }
     } finally {
+      if (session?.ok) {
+        logger.info(
+          {
+            event: 'playback_request_end',
+            session_id: session.handle.sessionId,
+            request_id: requestId,
+            username: auth?.username,
+            transport: 'proxy',
+            outcome: playbackOutcome,
+            error_code: playbackErrorCode,
+            duration_ms: Date.now() - startTime,
+            bytes_served: playbackBytes,
+            upstream_status: upstreamResponse?.statusCode,
+          },
+          'playback request ended'
+        );
+      }
       // Ends this request only; the session idles out on its own.
       if (session?.ok) session.handle.close();
     }

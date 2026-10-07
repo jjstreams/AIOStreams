@@ -256,6 +256,18 @@ export class StreamRegistry {
       session.displayUrl = input.displayUrl;
     }
 
+    const readStartedAt = Date.now();
+    logger.info(
+      {
+        event: 'playback_read_started',
+        session_id: session.id,
+        username: session.username,
+        transport: session.transport,
+        read_id: read.id,
+        range_start: read.start,
+      },
+      'playback read started'
+    );
     let closed = false;
     return {
       sessionId: session.id,
@@ -293,6 +305,18 @@ export class StreamRegistry {
       close: () => {
         if (closed) return;
         closed = true;
+        logger.info(
+          {
+            event: 'playback_read_closed',
+            session_id: session.id,
+            username: session.username,
+            transport: session.transport,
+            read_id: read.id,
+            bytes_served: read.bytes,
+            duration_ms: Date.now() - readStartedAt,
+          },
+          'playback read closed'
+        );
         session.reads.delete(read.id);
         session.lastSeenAt = Date.now();
         session.dirty = true;
