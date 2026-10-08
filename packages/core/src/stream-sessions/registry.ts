@@ -159,7 +159,7 @@ export class StreamRegistry {
         existing.reads.size === 0 &&
         now - existing.lastSeenAt > REJOIN_GRACE_MS;
       if (resuming) {
-        const verdict = this.admit(input, now);
+        const verdict = this.admit(input, now, existing.id);
         if (!verdict.ok) {
           this.finalise(
             existing,
@@ -203,7 +203,7 @@ export class StreamRegistry {
     return { ok: true, handle: this.addRead(session, input, now) };
   }
 
-  private admit(input: StreamOpenInput, now: number) {
+  private admit(input: StreamOpenInput, now: number, sessionId?: string) {
     const usage = bandwidthSnapshot(now);
     let liveUser = 0;
     let liveGlobal = 0;
@@ -218,7 +218,7 @@ export class StreamRegistry {
       liveUser += s.pendingBytes;
       if (s.reads.size > 0) activeSessions++;
     }
-    return checkAdmission({
+    const verdict = checkAdmission({
       username: input.username,
       targetKey: input.targetKey,
       share: input.share,
@@ -227,6 +227,23 @@ export class StreamRegistry {
       userBytes: (usage.byUser.get(input.username) ?? 0) + liveUser,
       globalBytes: usage.global + liveGlobal,
     });
+    if (!verdict.ok) {
+      logger.warn(
+        {
+          event: 'playback_admission_refused',
+          instance_id: this.instanceId,
+          session_id: sessionId,
+          username: input.username,
+          transport: input.transport,
+          reason: verdict.reason,
+          phase: sessionId ? 'resume' : 'create',
+          active_sessions: activeSessions,
+          global_active_sessions: globalActiveSessions,
+        },
+        'playback admission refused'
+      );
+    }
+    return verdict;
   }
 
   private addRead(

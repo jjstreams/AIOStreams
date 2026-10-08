@@ -31,6 +31,13 @@ account that pushes is independent of the identity recorded inside the commit,
 so both need checking: a push as `jjstreams` still publishes a personal author
 line if the local config was wrong.
 
+Before every push or PR operation, verify `gh api user --jq .login` returns
+`jjstreams`. Stop if it names another account. For commands that must retain
+their identity while other repositories use GitHub CLI, scope `GH_TOKEN` to
+that command using `gh auth token --hostname github.com --user jjstreams`;
+never print or save that token. Account switching is global to GitHub CLI,
+not local to this checkout.
+
 If the wrong identity is already in a commit that has not been pushed, rewrite
 it: `git commit --amend --reset-author --no-edit`. Once it is pushed, the name
 stays visible in the pull request and its timeline even after a force-push, and
