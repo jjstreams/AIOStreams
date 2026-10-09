@@ -35,5 +35,7 @@ jobs:
         run: corepack enable
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
+      - name: Test Playback Admission Logging
+        run: pnpm -F core run test:admission-logging
       - name: Build Addon
         run: pnpm run build

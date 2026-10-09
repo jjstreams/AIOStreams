@@ -395,11 +395,18 @@ router.all(
           start: rangeStart(req.headers.range),
         });
         if (!session.ok) {
-          logger.warn(`[${requestId}] Proxy stream refused`, {
-            username: auth.username,
-            clientIp,
-            reason: session.verdict.reason,
-          });
+          logger.warn(
+            {
+              event: 'playback_proxy_refused',
+              request_id: requestId,
+              instance_id: streamRegistry.instanceId,
+              username: auth.username,
+              transport: 'proxy',
+              reason: session.verdict.reason,
+              status: 302,
+            },
+            'playback proxy refused'
+          );
           res
             .status(302)
             .redirect(`/static/${StaticFiles.CONTENT_PROXY_LIMIT_REACHED}`);
