@@ -19,8 +19,10 @@ import {
   personasOf,
   qi,
   qs,
+  resolveConfig,
 } from './context.js';
 import { itemFromDescriptor } from './items.js';
+import { pickerListed } from './users.js';
 
 const logger = createLogger('jellyfin');
 const router: Router = Router({ mergeParams: true });
@@ -137,11 +139,21 @@ const METAHUB_STILL =
   /^(https:\/\/episodes\.metahub\.space\/.+\/)w(\d+)(\.jpg)$/;
 const METAHUB_STILL_WIDTHS = [185, 300, 500, 780];
 
+// AIOMetadata's poster cache, which names the image it serves in its own path.
+const POSTER_CACHE =
+  /^(https?:\/\/[^/]+\/poster-cache\/(?:[a-z]+\/)?)(https?):(\/\/?)(.+)$/;
+
 /**
  * The smallest rendition at least `width` wide, for hosts whose URLs name
  * one, and never larger than the URL already asks for.
  */
 function sized(url: string, width: number): string {
+  const cached = POSTER_CACHE.exec(url);
+  if (cached) {
+    const [, prefix, scheme, slashes, rest] = cached;
+    const inner = sized(`${scheme}://${rest}`, width);
+    return `${prefix}${inner.replace('://', `:${slashes}`)}`;
+  }
   const tmdb = TMDB.exec(url);
   if (tmdb) {
     const current = tmdb[1] ? Number(tmdb[1]) : Infinity;
@@ -312,19 +324,30 @@ router.get(
   jfOptional(personImage)
 );
 
-/* Anonymous on the picker, where the address is the credential. */
+/* Anonymous on the picker, where the address is the credential: only for the users it lists. */
 router.get(
   ['/Users/:userId/Images/:type', '/Users/:userId/Images/:type/:index'],
   jfOptional(async (req, res, ctx) => {
     const wanted = param(req, 'userId').toLowerCase();
-    let avatar: string | undefined;
-    if (ctx && wanted === personaUserId(ctx.uuid, '')) {
-      avatar = ctx.userData.jellyfin?.primary?.avatar;
-    } else if (ctx) {
-      avatar = personasOf(ctx.userData).find(
-        (p) => personaUserId(ctx.uuid, p.id) === wanted
-      )?.avatar;
-    }
+    const mount = ctx ? undefined : req.jfMount;
+    const uuid = ctx?.uuid ?? mount?.uuid;
+    const userData =
+      ctx?.userData ??
+      (mount && (await resolveConfig(mount.uuid, mount.encryptedPassword)));
+    const users = !userData
+      ? []
+      : mount
+        ? pickerListed(mount, userData)
+        : [null, ...personasOf(userData)];
+    const user = users.find(
+      (p) => uuid && personaUserId(uuid, p?.id ?? '') === wanted
+    );
+    const avatar =
+      user === undefined
+        ? undefined
+        : user
+          ? user.avatar
+          : userData?.jellyfin?.primary?.avatar;
     if (!avatar) {
       res.status(404).end();
       return;

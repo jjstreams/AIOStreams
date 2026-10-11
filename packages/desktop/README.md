@@ -1,9 +1,9 @@
 # AIOStreams Desktop
 
-The AIOStreams app (`packages/jellyfin-web`) in a native window, playing through mpv. It
+The AIOStreams app (`packages/web`) in a native window, playing through mpv. It
 runs on Windows, Linux and macOS, with downloads for each, and is in alpha. This file
 covers building it and how it works; using it is in the docs'
-[Desktop app guide](https://docs.aiostreams.viren070.me/guides/desktop-app).
+[Desktop app guide](https://docs.aiostreams.viren070.me/apps/desktop).
 
 The window shows the web app's standalone build, which picks its own server: any Jellyfin server
 works, and AIOStreams servers get the extras. Switching servers happens in the page.
@@ -60,7 +60,7 @@ The code is a Cargo workspace, outside the pnpm build:
 The page comes first on every platform:
 
 ```sh
-pnpm -F @aiostreams/jellyfin-web build:standalone   # into jellyfin-web/dist-standalone
+pnpm -F @aiostreams/web build:standalone   # into web/dist-standalone
 ```
 
 A debug build finds the page in the repo, and on Windows libmpv too. A release build looks next to
@@ -122,7 +122,7 @@ from a release build.
 
 | Flag                          | Does                                                                            |
 | ----------------------------- | ------------------------------------------------------------------------------- |
-| `--web <url>`                 | Loads this page instead, e.g. `pnpm -F @aiostreams/jellyfin-web dev:standalone` |
+| `--web <url>`                 | Loads this page instead, e.g. `pnpm -F @aiostreams/web dev:standalone` |
 | `--web-dir <dir>`             | Serves the standalone build from this folder                                    |
 | `--devtools`                  | Allows DevTools in a release build                                              |
 | `--remote-debugging-port <n>` | Opens the web view's debugging port, for driving tests                          |
@@ -227,7 +227,7 @@ target; to look at one locally:
 
 ## Bridge
 
-The page sees `window.aiostreamsDesktop` (`protocol`, `version`, `platform`, `send`, `subscribe`) on
+The page sees `window.aiostreamsApp` (`protocol`, `version`, `platform`, `send`, `subscribe`) on
 the app's own origin only. Messages from any other origin are dropped, navigation away from it opens
 the default browser, and every mpv command, property and `loadfile` option is checked against an
 allowlist in `core/src/bridge.rs`: pages can play http(s) URLs, not local files or scripts. A page

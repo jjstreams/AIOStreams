@@ -47,9 +47,10 @@ export const jellyfinCors: express.RequestHandler = (req, res, next) => {
   );
   res.setHeader(
     'Access-Control-Expose-Headers',
-    'Content-Length, Content-Range'
+    'Content-Length, Content-Range, Retry-After'
   );
   if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Max-Age', '86400');
     res.status(204).end();
     return;
   }

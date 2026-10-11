@@ -105,6 +105,76 @@ pub enum Inbound {
     },
     /// The page can take `link` messages, and any that arrived before it loaded.
     LinksReady,
+    /// Downloads to fetch; one already known keeps its state.
+    DownloadAdd {
+        jobs: Vec<DownloadJob>,
+    },
+    /// `pause`, `resume` or `retry`.
+    DownloadControl {
+        id: String,
+        action: String,
+    },
+    /// Forgets a download, and with `files` deletes what it saved.
+    DownloadRemove {
+        id: String,
+        files: bool,
+    },
+    /// Asks for a `download-state` answer.
+    DownloadList,
+    /// Lets the user pick the folder new downloads go to.
+    DownloadFolder,
+    /// Shows the downloads folder, or one download's, in the file manager.
+    DownloadOpen {
+        id: Option<String>,
+    },
+    DownloadConfig {
+        concurrent: u32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileKind {
+    Video,
+    Subtitle,
+    Image,
+}
+
+/// A file to fetch, at a path relative to the downloads folder.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadFile {
+    pub url: String,
+    pub path: String,
+    pub kind: FileKind,
+}
+
+/// A file the page writes itself, such as the item's details.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadText {
+    pub path: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadJob {
+    pub id: String,
+    pub title: String,
+    pub files: Vec<DownloadFile>,
+    #[serde(default)]
+    pub texts: Vec<DownloadText>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DownloadStatus {
+    pub id: String,
+    /// `queued`, `downloading`, `paused`, `failed` or `done`.
+    pub state: &'static str,
+    pub bytes: u64,
+    pub total: Option<u64>,
+    pub error: Option<String>,
+    /// Where a finished download's video and subtitles are, for playing it.
+    pub video: Option<String>,
+    pub subtitles: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -174,6 +244,17 @@ pub enum Outbound {
     },
     Error {
         message: String,
+    },
+    DownloadState {
+        folder: String,
+        jobs: Vec<DownloadStatus>,
+    },
+    /// The running download's video; `speed` in bytes a second.
+    DownloadProgress {
+        id: String,
+        bytes: u64,
+        total: Option<u64>,
+        speed: u64,
     },
 }
 
@@ -330,14 +411,16 @@ fn check_number(v: Option<&String>) -> Result<(), String> {
     }
 }
 
-pub fn command(args: &[Value]) -> Result<Vec<String>, String> {
+/// `local` says whether a path is one of the app's own downloads, the only
+/// files the page may open.
+pub fn command(args: &[Value], local: &dyn Fn(&str) -> bool) -> Result<Vec<String>, String> {
     let args = args.iter().map(arg_string).collect::<Result<Vec<_>, _>>()?;
     let name = args.first().ok_or("empty command")?.as_str();
     match name {
         // loadfile <url> [<flags> [<index> [<options>]]]
         "loadfile" => {
-            if !args.get(1).is_some_and(|u| is_web_url(u)) {
-                return Err("loadfile takes an http(s) url".into());
+            if !args.get(1).is_some_and(|u| is_web_url(u) || local(u)) {
+                return Err("loadfile takes an http(s) url or a download".into());
             }
             check_flags(
                 args.get(2),
@@ -358,8 +441,8 @@ pub fn command(args: &[Value]) -> Result<Vec<String>, String> {
             }
         }
         "sub-add" | "audio-add" => {
-            if !args.get(1).is_some_and(|u| is_web_url(u)) {
-                return Err(format!("{name} takes an http(s) url"));
+            if !args.get(1).is_some_and(|u| is_web_url(u) || local(u)) {
+                return Err(format!("{name} takes an http(s) url or a download"));
             }
             check_flags(args.get(2), &["select", "auto", "cached"])?;
             if args.len() > 5 {

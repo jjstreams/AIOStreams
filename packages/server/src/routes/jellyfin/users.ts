@@ -49,8 +49,10 @@ const router: Router = Router({ mergeParams: true });
 export function userConfiguration() {
   return {
     AudioLanguagePreference: '',
+    AudioLanguages: [] as string[],
     PlayDefaultAudioTrack: true,
     SubtitleLanguagePreference: '',
+    SubtitleLanguages: [] as string[],
     DisplayMissingEpisodes: true,
     GroupedFolders: [],
     SubtitleMode: 'Default',
@@ -67,10 +69,16 @@ export function userConfiguration() {
   };
 }
 
+const isLanguage = (v: unknown) => typeof v === 'string' && v.length <= 16;
+const isLanguageList = (v: unknown) =>
+  Array.isArray(v) && v.length <= 10 && v.every((l) => isLanguage(l) && l);
+
 /** The playback preferences a user can set and this server keeps. */
 const USER_PREFERENCES: Record<string, (value: unknown) => boolean> = {
-  AudioLanguagePreference: (v) => typeof v === 'string' && v.length <= 16,
-  SubtitleLanguagePreference: (v) => typeof v === 'string' && v.length <= 16,
+  AudioLanguagePreference: isLanguage,
+  AudioLanguages: isLanguageList,
+  SubtitleLanguagePreference: isLanguage,
+  SubtitleLanguages: isLanguageList,
   SubtitleMode: (v) => SUBTITLE_MODES.some((mode) => mode === v),
   PlayDefaultAudioTrack: (v) => typeof v === 'boolean',
   RememberAudioSelections: (v) => typeof v === 'boolean',
@@ -85,6 +93,31 @@ function userPreferences(body: unknown): Record<string, unknown> {
       USER_PREFERENCES[key]?.(value)
     )
   );
+}
+
+const LANGUAGE_LISTS = [
+  ['AudioLanguagePreference', 'AudioLanguages'],
+  ['SubtitleLanguagePreference', 'SubtitleLanguages'],
+] as const;
+
+/**
+ * Keeps each single language the first of its list. A client that only knows
+ * the single one may send back the list it read, so a single language that
+ * isn't that list's first is its choice, and goes to the front.
+ */
+function withLanguageLists(
+  config: Record<string, unknown>,
+  sent: Record<string, unknown>
+): Record<string, unknown> {
+  for (const [single, list] of LANGUAGE_LISTS) {
+    if (!(single in sent) && !(list in sent)) continue;
+    const languages = (config[list] as string[] | undefined) ?? [];
+    const one = config[single] as string;
+    if (single in sent && one !== (languages[0] ?? ''))
+      config[list] = one ? [one, ...languages.filter((l) => l !== one)] : [];
+    config[single] = (config[list] as string[] | undefined)?.[0] ?? '';
+  }
+  return config;
 }
 
 export async function storedUserConfiguration(scope: WatchScope) {
@@ -273,18 +306,43 @@ export async function authenticationResult(
   };
 }
 
-/** Every user of one configuration, the account first. */
-export function allUsers(
+/** Off the sign-in picker and out of other users' lists. */
+function isHidden(userData: Faced, user: JellyfinPersona | null): boolean {
+  return !!(user ? user.hidden : userData.jellyfin?.primary?.hidden);
+}
+
+/** A list shows its caller and the users not hidden; a hidden persona sees only itself. */
+export function listedFor(
+  userData: Faced,
+  caller: JellyfinPersona | null,
+  user: JellyfinPersona | null
+): boolean {
+  if ((caller?.id ?? '') === (user?.id ?? '')) return true;
+  return !caller?.hidden && !isHidden(userData, user);
+}
+
+/** The account first; an API key lists every user it can act as. */
+function allUsers(
   uuid: string,
   userData: UserData,
+  caller: JellyfinPersona | null,
   opts: { forKey?: boolean } = {}
 ) {
-  return [
-    userDto(uuid, userData, null, opts),
-    ...personasOf(userData)
-      .filter((p) => (opts.forKey ? !personaLocked(p) : !p.hidden))
-      .map((p) => userDto(uuid, userData, p, opts)),
-  ];
+  return [null, ...personasOf(userData)]
+    .filter((p) =>
+      opts.forKey ? !p || !personaLocked(p) : listedFor(userData, caller, p)
+    )
+    .map((p) => userDto(uuid, userData, p, opts));
+}
+
+/** A personal address lists its own user, any other picker everyone not hidden. */
+export function pickerListed(
+  mount: PickerMount,
+  userData: UserData
+): (JellyfinPersona | null)[] {
+  return mount.persona
+    ? personasOf(userData).filter((p) => p.id === mount.persona && p.hidden)
+    : [null, ...personasOf(userData)].filter((p) => !isHidden(userData, p));
 }
 
 /**
@@ -314,7 +372,13 @@ router.get(
       : null;
     // Without a configuration to list for, an empty list is what makes a
     // client show the manual form that takes a uuid or alias.
-    res.json(mount && userData ? allUsers(mount.uuid, userData) : []);
+    res.json(
+      mount && userData
+        ? pickerListed(mount, userData).map((p) =>
+            userDto(mount.uuid, userData, p)
+          )
+        : []
+    );
   })
 );
 
@@ -355,22 +419,50 @@ function parseSignIn(
       };
 }
 
+type PickerMount = NonNullable<Request['jfMount']>;
+
+interface PickerTarget {
+  userData: UserData;
+  persona: JellyfinPersona;
+}
+
+/** The persona a picker sign-in names. A personal address takes only its own user's name, or none. */
+async function pickerTarget(
+  mount: PickerMount,
+  name: string
+): Promise<PickerTarget | null> {
+  const userData = await resolveConfig(mount.uuid, mount.encryptedPassword);
+  if (!userData) return null;
+  if (!mount.persona) {
+    const persona = personaByName(userData, name);
+    return persona ? { userData, persona } : null;
+  }
+  const persona = personaById(userData, mount.persona);
+  if (!persona?.hidden) return null;
+  const wanted = name.trim().toLowerCase();
+  return !wanted ||
+    wanted === persona.id ||
+    wanted === persona.name.trim().toLowerCase()
+    ? { userData, persona }
+    : null;
+}
+
 /** Shorter PINs are too easy to guess once the picker address has leaked. */
 const PIN_ONLY_PATTERN = /^\d{6,12}$/;
 
 /** The picker address's credential stands in for the password. */
 async function pinOnlySignIn(
-  mount: { uuid: string; encryptedPassword: string },
-  personaName: string,
+  mount: PickerMount,
+  target: PickerTarget,
   pin: string
-): Promise<{ userData: UserData; persona: JellyfinPersona } | null> {
-  if (!appConfig.jellyfin.pinSignIn || !personaName) return null;
-  if (!PIN_ONLY_PATTERN.test(pin)) return null;
-  const userData = await resolveConfig(mount.uuid, mount.encryptedPassword);
-  const persona = userData ? personaByName(userData, personaName) : null;
-  if (!userData || !persona || !personaLocked(persona)) return null;
-  if (!(await userUnlocks(mount.uuid, userData, persona, pin))) return null;
-  return { userData, persona };
+): Promise<boolean> {
+  if (!appConfig.jellyfin.pinSignIn || !PIN_ONLY_PATTERN.test(pin)) {
+    return false;
+  }
+  return (
+    personaLocked(target.persona) &&
+    userUnlocks(mount.uuid, target.userData, target.persona, pin)
+  );
 }
 
 router.post(
@@ -403,10 +495,17 @@ router.post(
       res.status(401).json({ Message: 'Invalid username or password' });
       return;
     }
+    const own = mount?.persona ? await pickerTarget(mount, personaName) : null;
+    if (mount?.persona && !own) {
+      res.status(401).json({ Message: 'Invalid username or password' });
+      return;
+    }
     const proven = await checkPassword(uuid, pw);
     if (!proven) {
-      const byPin = mount ? await pinOnlySignIn(mount, personaName, pw) : null;
-      if (!mount || !byPin) {
+      const byPin =
+        own ??
+        (mount && personaName ? await pickerTarget(mount, personaName) : null);
+      if (!mount || !byPin || !(await pinOnlySignIn(mount, byPin, pw))) {
         res.status(401).json({ Message: 'Invalid username or password' });
         return;
       }
@@ -439,13 +538,14 @@ router.post(
       return;
     }
     // On a picker address the account also answers to its alias, after its users.
-    const signIn =
-      resolveSignIn(userData, personaName) ??
-      (mount &&
-      (await resolvePickerAlias(personaName))?.uuid.toLowerCase() ===
-        uuid.toLowerCase()
-        ? { persona: null }
-        : null);
+    const signIn = own
+      ? { persona: own.persona }
+      : (resolveSignIn(userData, personaName) ??
+        (mount &&
+        (await resolvePickerAlias(personaName))?.uuid.toLowerCase() ===
+          uuid.toLowerCase()
+          ? { persona: null }
+          : null));
     if (!signIn) {
       res.status(401).json({ Message: 'Invalid username or password' });
       return;
@@ -538,7 +638,9 @@ router.get(
 router.get(
   '/Users',
   jf(async (_req, res, ctx) => {
-    res.json(allUsers(ctx.uuid, ctx.userData, { forKey: !!ctx.apiKey }));
+    res.json(
+      allUsers(ctx.uuid, ctx.userData, ctx.persona, { forKey: !!ctx.apiKey })
+    );
   })
 );
 /* Read only: a user token's persona is its own, never the id in the URL. */
@@ -546,12 +648,12 @@ router.get(
   '/Users/:userId',
   jf(async (req, res, ctx) => {
     const wanted = param(req, 'userId').toLowerCase();
-    const persona =
-      wanted === personaUserId(ctx.uuid, '')
-        ? null
-        : (personasOf(ctx.userData).find(
-            (p) => personaUserId(ctx.uuid, p.id) === wanted
-          ) ?? ctx.persona);
+    const found = [null, ...personasOf(ctx.userData)].find(
+      (p) =>
+        personaUserId(ctx.uuid, p?.id ?? '') === wanted &&
+        (!ctx.persona || listedFor(ctx.userData, ctx.persona, p))
+    );
+    const persona = found === undefined ? ctx.persona : found;
     res.json({
       ...userDto(ctx.uuid, ctx.userData, persona, { forKey: !!ctx.apiKey }),
       Configuration: await storedUserConfiguration(
@@ -571,10 +673,11 @@ router.post(
   ['/Users/Configuration', '/Users/:userId/Configuration'],
   jf(async (req, res, ctx) => {
     const stored = await JellyfinRepository.getUserConfiguration(ctx.watch);
-    await JellyfinRepository.setUserConfiguration(ctx.watch, {
-      ...userPreferences(stored),
-      ...userPreferences(req.body),
-    });
+    const sent = userPreferences(req.body);
+    await JellyfinRepository.setUserConfiguration(
+      ctx.watch,
+      withLanguageLists({ ...userPreferences(stored), ...sent }, sent)
+    );
     res.status(204).end();
   })
 );

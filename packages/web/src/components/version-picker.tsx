@@ -1,0 +1,871 @@
+import React from 'react';
+import { toast } from 'sonner';
+import {
+  BiBarChartAlt2,
+  BiCopy,
+  BiDotsVerticalRounded,
+  BiDownload,
+  BiErrorCircle,
+  BiInfoCircle,
+  BiLink,
+  BiLinkExternal,
+  BiPlay,
+  BiRefresh,
+  BiSearch,
+} from 'react-icons/bi';
+import { Button, IconButton } from '@aiostreams/ui/button';
+import { DropdownMenu, DropdownMenuItem } from '@aiostreams/ui/dropdown-menu';
+import { Drawer } from '@aiostreams/ui/drawer';
+import { Modal } from '@aiostreams/ui/modal';
+import { useMediaQuery } from '@aiostreams/ui/hooks/media-query';
+import { Skeleton } from '@aiostreams/ui/skeleton';
+import { TextInput } from '@aiostreams/ui/text-input';
+import { Tooltip } from '@aiostreams/ui/tooltip';
+import { copyToClipboard } from '@aiostreams/ui/utils/clipboard';
+import { useQueryClient } from '@tanstack/react-query';
+import { useSession } from '../lib/session';
+import { useFeature } from '../lib/server-info';
+import {
+  useItem,
+  usePlaybackInfo,
+  usePlaybackInfoOptions,
+  useRefreshPlaybackInfo,
+  useSetPlayed,
+} from '../lib/queries';
+import { directUrl } from '../lib/playback/stream';
+import {
+  downloadsHost,
+  useAddDownloads,
+  useFindDownloaded,
+  useReplaceVersion,
+  type Download,
+} from '../lib/downloads';
+import { chosenPlayer } from '../lib/playback/player-choice';
+import {
+  lastVersions,
+  noticeSources,
+  playableSources,
+  usePlay,
+} from '../lib/playback/play';
+import { currentHost } from '../lib/hosts';
+import { focusOn, keyboardFocus } from '../lib/input';
+import { clock, itemSubtitle, itemTitle, ticksToMs } from '../lib/format';
+import { cn } from '@aiostreams/ui/core/styling';
+import { backdropUrl, landscapeUrl } from '../lib/images';
+import { itemPath, navigate, to } from '../lib/paths';
+import { settings, useSetting } from '../lib/settings';
+import type { BaseItemDto, SourceInfo } from '../lib/types';
+import { CachedImage } from './cached-image';
+
+interface Request {
+  item: BaseItemDto;
+  startMs: number;
+  /** From the player: the version playing, which a pick replaces. */
+  playing?: string;
+  /** A pick downloads `items`, which start with `item`, or replaces `replace`'s version. */
+  download?: { items: BaseItemDto[]; replace?: Download };
+}
+
+interface PickerValue {
+  /** Lists the item's versions; nothing is resolved until this is called. */
+  open(item: BaseItemDto, opts?: { startMs?: number; playing?: string }): void;
+  /** What Play does (see `useStraightPlay`); a hold does the other. */
+  play(item: BaseItemDto, opts?: { startMs?: number; held?: boolean }): void;
+  /**
+   * Downloads the items, the first one's pick deciding the rest, or with
+   * `replace` gives that download another version.
+   */
+  download(items: BaseItemDto[], opts?: { replace?: Download }): void;
+}
+
+const PickerContext = React.createContext<PickerValue | null>(null);
+
+const rememberedVersion = (item: BaseItemDto, startMs: number) =>
+  startMs > 0 ? lastVersions.get(item.Id!) : undefined;
+
+export function useStraightPlay(): (
+  item: BaseItemDto,
+  startMs: number
+) => boolean {
+  const [autoPlay] = useSetting(settings.autoPlayFirst);
+  return React.useCallback(
+    (item, startMs) => autoPlay || !!rememberedVersion(item, startMs),
+    [autoPlay]
+  );
+}
+
+/** Opens the picker once, then drops `pick` from the address. */
+export function PickOnArrival({ itemId }: { itemId: string }) {
+  const item = useItem(itemId);
+  const picker = useVersionPicker();
+  const opened = React.useRef(false);
+  React.useEffect(() => {
+    if (!item.data || opened.current) return;
+    opened.current = true;
+    picker.open(item.data, {
+      startMs: ticksToMs(item.data.UserData?.PlaybackPositionTicks),
+    });
+    navigate(itemPath(item.data), { replace: true });
+  }, [item.data, picker]);
+  return null;
+}
+
+export function useVersionPicker(): PickerValue {
+  const value = React.useContext(PickerContext);
+  if (!value) throw new Error('useVersionPicker needs a VersionPickerProvider');
+  return value;
+}
+
+export function VersionPickerProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [request, setRequest] = React.useState<Request | null>(null);
+  const [external, setExternal] = React.useState<BaseItemDto | null>(null);
+  const straight = useStraightPlay();
+  const queryClient = useQueryClient();
+  const infoOptions = usePlaybackInfoOptions();
+  const playVersion = usePlay();
+  const addDownloads = useAddDownloads();
+  const downloaded = useFindDownloaded();
+  const [autoPick] = useSetting(settings.autoPlayFirst);
+  const latest = React.useRef({
+    straight,
+    queryClient,
+    infoOptions,
+    playVersion,
+    addDownloads,
+    downloaded,
+    autoPick,
+  });
+  latest.current = {
+    straight,
+    queryClient,
+    infoOptions,
+    playVersion,
+    addDownloads,
+    downloaded,
+    autoPick,
+  };
+
+  const value = React.useMemo<PickerValue>(() => {
+    // The version last played when resuming, else the first; the list when none plays.
+    const playStraight = async (item: BaseItemDto, startMs: number) => {
+      const { queryClient, infoOptions, playVersion } = latest.current;
+      const last = rememberedVersion(item, startMs);
+      // The player page finds the version itself, and lists them if it is gone.
+      if (last && !currentHost().play && chosenPlayer().kind !== 'link') {
+        navigate(to.play(item.Id!, last, startMs));
+        return;
+      }
+      const notice = toast.loading('Finding a version…');
+      try {
+        const info = await queryClient.fetchQuery(infoOptions(item.Id!));
+        const sources = playableSources(info);
+        const source = sources.find((s) => s.Id === last) ?? sources[0];
+        if (!source) setRequest({ item, startMs });
+        else
+          await playVersion(item, {
+            source,
+            startMs,
+            onExternal: () => setExternal(item),
+          });
+      } catch {
+        setRequest({ item, startMs });
+      } finally {
+        setTimeout(() => toast.dismiss(notice));
+      }
+    };
+    return {
+      open: (item, opts) =>
+        setRequest({
+          item,
+          startMs: opts?.startMs ?? 0,
+          playing: opts?.playing,
+        }),
+      play: (item, opts) => {
+        const startMs = opts?.startMs ?? 0;
+        // Holding still lists the versions.
+        const local = !opts?.held && latest.current.downloaded(item);
+        if (local && chosenPlayer().kind !== 'link') {
+          navigate(to.play(item.Id!, local.source!.Id!, startMs));
+          return;
+        }
+        if (latest.current.straight(item, startMs) !== !!opts?.held)
+          void playStraight(item, startMs);
+        else setRequest({ item, startMs });
+      },
+      download: (items, opts) => {
+        if (!items.length || !downloadsHost()) return;
+        // As Play does, the setting skips the list and takes the first version.
+        if (latest.current.autoPick && !opts?.replace)
+          void latest.current.addDownloads(items);
+        else
+          setRequest({
+            item: items[0],
+            startMs: 0,
+            download: { items, replace: opts?.replace },
+          });
+      },
+    };
+  }, []);
+  const item = request?.item;
+  const open = !!request;
+  // A sheet over the player, or where a short screen leaves a dialog no room.
+  const short = useMediaQuery('(max-height: 500px)');
+  // Kept while it closes, so it leaves the way it came.
+  const [sheet, setSheet] = React.useState(false);
+  const wantSheet = !!request?.playing || short;
+  if (request && sheet !== wantSheet) setSheet(wantSheet);
+  // Opened from code, it has no trigger for focus to go back to.
+  const opener = React.useRef<Element | null>(null);
+  React.useLayoutEffect(() => {
+    if (open) opener.current = document.activeElement;
+  }, [open]);
+  const restoreFocus = (e: Event) => {
+    if (!(opener.current instanceof HTMLElement)) return;
+    e.preventDefault();
+    opener.current.focus({ preventScroll: true });
+  };
+  const versions = request && (
+    <Versions
+      key={request.item.Id}
+      request={request}
+      compact={sheet}
+      onDone={() => setRequest(null)}
+      onExternal={() => {
+        setExternal(request.item);
+        setRequest(null);
+      }}
+    />
+  );
+  return (
+    <PickerContext.Provider value={value}>
+      {children}
+      {sheet ? (
+        <Drawer
+          data-ui="dialog"
+          data-name="versions"
+          open={open}
+          onOpenChange={(open) => !open && setRequest(null)}
+          onCloseAutoFocus={restoreFocus}
+          title={item ? itemTitle(item) : 'Versions'}
+          headerClass="sr-only"
+          side="right"
+          size="md"
+          contentClass="flex flex-col gap-0 overflow-hidden p-0"
+          closeClass="right-2 top-[calc(0.75rem+env(safe-area-inset-top))]"
+        >
+          {versions}
+        </Drawer>
+      ) : (
+        <Modal
+          data-ui="dialog"
+          data-name="versions"
+          open={open}
+          onOpenChange={(open) => !open && setRequest(null)}
+          onCloseAutoFocus={restoreFocus}
+          title={item ? itemTitle(item) : undefined}
+          description={
+            item?.Type === 'Episode'
+              ? itemSubtitle(item)
+              : item?.ProductionYear || undefined
+          }
+          contentClass="flex w-full max-w-4xl flex-col gap-0 overflow-hidden p-0 max-md:h-[100dvh] max-md:rounded-none max-md:border-0 md:max-h-[85vh]"
+          headerClass="relative z-[1] px-4 pb-3 pr-14 pt-5 text-left max-md:pt-[calc(1.25rem+env(safe-area-inset-top))] sm:px-5 sm:pr-14"
+          closeClass="z-[2] max-md:top-[calc(1rem+env(safe-area-inset-top))]"
+        >
+          {versions}
+        </Modal>
+      )}
+      <ExternalPrompt item={external} onClose={() => setExternal(null)} />
+    </PickerContext.Provider>
+  );
+}
+
+const FILTER_FROM = 8;
+
+function sourceText(source: SourceInfo): string {
+  return [
+    source.aiostreams?.name || source.Name,
+    source.aiostreams?.description,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function Versions({
+  request,
+  onDone,
+  onExternal,
+  compact,
+}: {
+  request: Request;
+  onDone: () => void;
+  onExternal: () => void;
+  /** In a narrow sheet, however wide the screen. */
+  compact: boolean;
+}) {
+  const { client } = useSession();
+  const { item } = request;
+  const info = usePlaybackInfo(item.Id!, { listing: true });
+  const refresh = useRefreshPlaybackInfo(item.Id!);
+  const refreshing = info.isFetching || refresh.isPending;
+  const canRefresh = useFeature('refreshVersions');
+  const play = usePlay();
+  const queryClient = useQueryClient();
+  const infoOptions = usePlaybackInfoOptions();
+  const addDownloads = useAddDownloads();
+  const replaceVersion = useReplaceVersion();
+  const download = request.download;
+  const canDownload = !!downloadsHost();
+  const [startMs, setStartMs] = React.useState(request.startMs);
+  const [filter, setFilter] = React.useState('');
+  const sources = playableSources(info.data);
+  const notices = noticeSources(info.data);
+  const terms = filter.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = terms.length
+    ? sources.filter((s) => {
+        const text = sourceText(s).toLowerCase();
+        return terms.every((t) => text.includes(t));
+      })
+    : sources;
+  const art =
+    backdropUrl(client, item, { maxWidth: 896 }) ??
+    landscapeUrl(client, item, { maxWidth: 896 });
+  // The art ends where the list starts, however tall the header above it grows.
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const [artHeight, setArtHeight] = React.useState<number>();
+  React.useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list?.parentElement) return;
+    const update = () => setArtHeight(list.offsetTop);
+    const observer = new ResizeObserver(update);
+    for (const el of Array.from(list.parentElement.children)) {
+      if (el === list) break;
+      observer.observe(el);
+    }
+    update();
+    return () => observer.disconnect();
+  }, []);
+  // Keys start on the actions above while the versions load, then on the first version.
+  const firstShown = shown[0]?.Id;
+  React.useEffect(() => {
+    // After the dialog puts focus on its first button.
+    const timer = setTimeout(() => {
+      const list = listRef.current;
+      const at = keyboardFocus();
+      const first = list?.querySelector<HTMLElement>('[data-ui=version-play]');
+      if (!firstShown || !list || !first || !at || list.contains(at)) return;
+      if (list.closest('[role=dialog]')?.contains(at)) focusOn(first);
+    });
+    return () => clearTimeout(timer);
+  }, [firstShown]);
+
+  const start = (source: SourceInfo) => {
+    if (download) {
+      onDone();
+      if (download.replace) replaceVersion(download.replace, source);
+      else void addDownloads(download.items, source);
+      return;
+    }
+    // The player's cached answer may predate this list and lack the version.
+    queryClient.removeQueries({
+      queryKey: infoOptions(item.Id!, source.Id ?? undefined).queryKey,
+      exact: true,
+    });
+    onDone();
+    play(item, {
+      source,
+      startMs,
+      replace: !!request.playing,
+      onExternal,
+    }).catch((e: Error) => toast.error(e.message));
+  };
+  const retry = () =>
+    refresh.mutate(undefined, {
+      onError: (e) => toast.error(e.message),
+    });
+
+  const count = info.data
+    ? sources.length === 1
+      ? '1 version'
+      : `${sources.length} versions`
+    : 'Finding versions';
+  const filtering = sources.length >= FILTER_FROM && !currentHost().tv;
+  const searchAgain = canRefresh && (
+    <Tooltip
+      trigger={
+        <IconButton
+          data-ui="versions-action"
+          data-name="search-again"
+          size="sm"
+          intent="gray-subtle"
+          className="rounded-full"
+          icon={<BiRefresh className={cn(refreshing && 'animate-spin')} />}
+          aria-label="Search again"
+          disabled={refreshing}
+          onClick={retry}
+        />
+      }
+    >
+      Search again
+    </Tooltip>
+  );
+  const downloadHint = download && (
+    <p data-ui="versions-download-hint" className="text-sm text-gray-300">
+      {download.items.length > 1
+        ? `Pick the version to download. The other ${download.items.length - 1} episodes get the same release where they have it.`
+        : 'Pick the version to download.'}
+    </p>
+  );
+  // A version switched to while playing carries on where it was.
+  const resumeToggle = request.startMs > 0 && !request.playing && (
+    <div
+      data-ui="versions-start"
+      className="grid grid-cols-2 gap-1 rounded-full bg-black/40 p-1"
+    >
+      <Button
+        size="sm"
+        intent={startMs ? 'white' : 'gray-basic'}
+        className="rounded-full"
+        onClick={() => setStartMs(request.startMs)}
+      >
+        Resume from {clock(request.startMs)}
+      </Button>
+      <Button
+        size="sm"
+        intent={startMs ? 'gray-basic' : 'white'}
+        className="rounded-full"
+        onClick={() => setStartMs(0)}
+      >
+        From the start
+      </Button>
+    </div>
+  );
+
+  return (
+    <>
+      {art && !compact && (
+        <div
+          aria-hidden
+          data-ui="versions-banner"
+          className="pointer-events-none absolute inset-x-0 top-0 overflow-hidden"
+          style={{ height: artHeight }}
+        >
+          <CachedImage
+            src={art}
+            alt=""
+            className="absolute inset-x-0 top-0 aspect-video min-h-full w-full object-cover opacity-25"
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-[--paper]/30 via-[--paper]/70 to-[--paper]" />
+        </div>
+      )}
+      {compact ? (
+        <div
+          data-ui="versions-header"
+          className="space-y-2 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))]"
+        >
+          <div className="flex items-center gap-2 pr-9">
+            {filtering ? (
+              <div className="min-w-0 flex-1">
+                <TextInput
+                  data-ui="versions-filter"
+                  value={filter}
+                  onValueChange={setFilter}
+                  placeholder={`Filter ${count}`}
+                  leftIcon={<BiSearch />}
+                  className="rounded-full"
+                />
+              </div>
+            ) : (
+              <p
+                data-ui="versions-count"
+                className="mr-auto text-sm text-[--muted]"
+              >
+                {count}
+              </p>
+            )}
+            {searchAgain}
+          </div>
+          {downloadHint}
+          {resumeToggle}
+        </div>
+      ) : (
+        <div
+          data-ui="versions-header"
+          className="relative z-[1] space-y-3 px-4 pb-3 sm:px-5"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <p
+              data-ui="versions-count"
+              className="mr-auto text-sm text-[--muted]"
+            >
+              {count}
+            </p>
+            <Button
+              data-ui="versions-action"
+              data-name="details"
+              size="sm"
+              intent="gray-subtle"
+              className="rounded-full"
+              leftIcon={<BiInfoCircle />}
+              onClick={() => {
+                onDone();
+                navigate(itemPath(item));
+              }}
+            >
+              Details
+            </Button>
+            {searchAgain}
+          </div>
+          {downloadHint}
+          {resumeToggle}
+          {filtering && (
+            <TextInput
+              data-ui="versions-filter"
+              value={filter}
+              onValueChange={setFilter}
+              placeholder="Filter versions"
+              leftIcon={<BiSearch />}
+              className="rounded-full"
+            />
+          )}
+        </div>
+      )}
+
+      <div
+        ref={listRef}
+        data-ui="versions-list"
+        data-nav-group
+        className={cn(
+          'relative z-[1] min-h-0 flex-1 space-y-2 overflow-y-auto border-t border-white/5 px-3 pb-5 pt-3 max-md:pb-[calc(1.25rem+env(safe-area-inset-bottom))]',
+          !compact && 'sm:px-5',
+          info.isLoading && 'overflow-hidden'
+        )}
+      >
+        {/* A phone's picker fills the screen, so it takes more to fill it. */}
+        {info.isLoading &&
+          Array.from({ length: 10 }, (_, i) => (
+            <Skeleton
+              key={i}
+              className={cn('h-24 w-full rounded-xl', i >= 4 && 'md:hidden')}
+            />
+          ))}
+        {info.isError && !info.data && (
+          <div className="space-y-3 rounded-xl border border-red-500/20 bg-red-950/20 p-3">
+            <p className="select-text text-sm text-red-300 [overflow-wrap:anywhere]">
+              Could not load the versions: {info.error.message}
+            </p>
+            <Button
+              size="sm"
+              intent="gray-outline"
+              className="rounded-full"
+              loading={refreshing}
+              onClick={retry}
+            >
+              Try again
+            </Button>
+          </div>
+        )}
+        {info.data && !sources.length && (
+          <p className="py-6 text-center text-sm text-[--muted]">
+            No versions were found.
+          </p>
+        )}
+        {!!sources.length && !shown.length && (
+          <p className="py-6 text-center text-sm text-[--muted]">
+            No versions match.
+          </p>
+        )}
+
+        {shown.map((source) => {
+          const link = directUrl(client, item.Id!, source);
+          const actions = [
+            ...(canDownload && !download
+              ? [
+                  {
+                    name: 'download',
+                    label: 'Download',
+                    icon: <BiDownload />,
+                    run: () => {
+                      onDone();
+                      void addDownloads([item], source);
+                    },
+                  },
+                ]
+              : []),
+            // A TV has nowhere to paste it.
+            ...(currentHost().tv
+              ? []
+              : [
+                  {
+                    name: 'copy-link',
+                    label: 'Copy stream link',
+                    icon: <BiCopy />,
+                    run: () =>
+                      copyToClipboard(link, {
+                        onSuccess: () => toast.success('Stream link copied'),
+                        onError: () => toast.error('Could not copy the link'),
+                      }),
+                  },
+                ]),
+          ];
+          return (
+            <div
+              key={source.Id}
+              data-ui="version"
+              data-playing={source.Id === request.playing || undefined}
+              data-cached={source.aiostreams?.cached || undefined}
+              className="group/version relative flex items-start rounded-xl border border-white/5 bg-white/[0.03] transition-colors hover:border-white/10 hover:bg-white/[0.06]"
+            >
+              <button
+                type="button"
+                data-ui="version-play"
+                // Inside the card's border, where an outline would ring it twice.
+                data-focus="own"
+                onClick={() => start(source)}
+                className="flex min-w-0 flex-1 items-start gap-3 rounded-xl p-3 text-left focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[--ring]"
+              >
+                <span
+                  data-ui="version-play-icon"
+                  className={cn(
+                    'hidden size-9 flex-none items-center justify-center rounded-full bg-white/10 text-white transition-colors group-hover/version:bg-white group-hover/version:text-black',
+                    !compact && 'sm:flex'
+                  )}
+                >
+                  {download ? (
+                    <BiDownload className="text-xl" />
+                  ) : (
+                    <BiPlay className="text-xl" />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1 space-y-1">
+                  {/* Room for the menu, so only the first line gives way. */}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'float-right ml-2 h-6 w-8',
+                      !compact && 'sm:hidden'
+                    )}
+                  />
+                  {source.Id === request.playing && (
+                    <span
+                      data-ui="version-playing"
+                      className="mb-1 inline-block rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-black"
+                    >
+                      Playing
+                    </span>
+                  )}
+                  <span
+                    data-ui="version-name"
+                    className={cn(
+                      'block whitespace-pre-line text-sm font-medium [overflow-wrap:anywhere]',
+                      !compact && 'sm:text-base'
+                    )}
+                  >
+                    {source.aiostreams?.name || source.Name}
+                  </span>
+                  {source.aiostreams?.description && (
+                    <span
+                      data-ui="version-description"
+                      className={cn(
+                        'block whitespace-pre-line text-xs text-gray-300 [overflow-wrap:anywhere]',
+                        !compact && 'sm:text-sm'
+                      )}
+                    >
+                      {source.aiostreams.description}
+                    </span>
+                  )}
+                </span>
+              </button>
+              {!!actions.length && (
+                <div
+                  className={cn(
+                    'absolute right-1.5 top-1.5',
+                    !compact && 'sm:hidden'
+                  )}
+                >
+                  <DropdownMenu
+                    data-ui="version-menu"
+                    align="end"
+                    trigger={
+                      <IconButton
+                        size="sm"
+                        intent="gray-basic"
+                        className="rounded-full"
+                        icon={<BiDotsVerticalRounded />}
+                        aria-label="More"
+                      />
+                    }
+                  >
+                    {actions.map((a) => (
+                      <DropdownMenuItem
+                        key={a.label}
+                        data-name={a.name}
+                        onClick={a.run}
+                      >
+                        {a.icon}
+                        {a.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenu>
+                </div>
+              )}
+              {!!actions.length && (
+                <div
+                  className={cn(
+                    'hidden flex-none gap-1 p-2',
+                    !compact && 'sm:flex'
+                  )}
+                >
+                  {actions.map((a) => (
+                    <Tooltip
+                      key={a.label}
+                      trigger={
+                        <IconButton
+                          data-ui="version-action"
+                          data-name={a.name}
+                          size="sm"
+                          intent="gray-basic"
+                          className="rounded-full"
+                          icon={a.icon}
+                          aria-label={a.label}
+                          onClick={a.run}
+                        />
+                      }
+                    >
+                      {a.label}
+                    </Tooltip>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {!terms.length &&
+          notices.map((notice) => <Notice key={notice.Id} notice={notice} />)}
+      </div>
+    </>
+  );
+}
+
+const NOTICE_ICONS: Record<string, React.ReactNode> = {
+  error: <BiErrorCircle />,
+  statistic: <BiBarChartAlt2 />,
+  external: <BiLink />,
+};
+
+/** An addon message, pipeline error or statistic: text, and a link at most. */
+function Notice({ notice }: { notice: SourceInfo }) {
+  // Other servers send the text in the name, the first line being its title.
+  const [head = '', ...rest] = (notice.Name ?? '').split('\n');
+  const { name, description, type, externalUrl } = notice.aiostreams ?? {
+    name: head,
+    description: rest.join('\n'),
+    type: 'info',
+  };
+  const error = type === 'error';
+  return (
+    <div
+      data-ui="version-notice"
+      data-type={type}
+      className={cn(
+        'flex items-start gap-3 rounded-xl border p-3',
+        error
+          ? 'border-red-500/20 bg-red-950/20'
+          : 'border-dashed border-white/10'
+      )}
+    >
+      <span
+        className={cn(
+          'mt-0.5 flex-none text-lg',
+          error ? 'text-red-300' : 'text-[--muted]'
+        )}
+      >
+        {NOTICE_ICONS[type] ?? <BiInfoCircle />}
+      </span>
+      <div className="min-w-0 flex-1 select-text space-y-1 whitespace-pre-line text-sm [overflow-wrap:anywhere]">
+        {name.trim() && (
+          <p className={cn('font-medium', error && 'text-red-300')}>
+            {name.trim()}
+          </p>
+        )}
+        {description.trim() && (
+          <p className="text-[--muted]">{description.trim()}</p>
+        )}
+      </div>
+      {externalUrl && (
+        <Tooltip
+          trigger={
+            <IconButton
+              size="sm"
+              intent="gray-basic"
+              className="flex-none rounded-full"
+              icon={<BiLinkExternal />}
+              aria-label="Open link"
+              onClick={() => window.open(externalUrl, '_blank', 'noopener')}
+            />
+          }
+        >
+          Open link
+        </Tooltip>
+      )}
+    </div>
+  );
+}
+
+/** An external player reports nothing back, so the user marks it themselves. */
+function ExternalPrompt({
+  item,
+  onClose,
+}: {
+  item: BaseItemDto | null;
+  onClose: () => void;
+}) {
+  const setPlayed = useSetPlayed();
+  return (
+    <Modal
+      data-ui="dialog"
+      data-name="external-player"
+      open={!!item}
+      onOpenChange={(open) => !open && onClose()}
+      title="Playing in your player"
+      description="Your player does not report back, so mark it as watched once you finish."
+      contentClass="max-w-md"
+    >
+      {item && (
+        <>
+          <p className="text-lg font-semibold">{itemTitle(item)}</p>
+          {item.Type === 'Episode' && (
+            <p className="text-sm text-[--muted]">{itemSubtitle(item)}</p>
+          )}
+          <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+            <Button
+              intent="gray-outline"
+              className="rounded-full"
+              onClick={onClose}
+            >
+              Not now
+            </Button>
+            <Button
+              intent="white"
+              className="rounded-full"
+              loading={setPlayed.isPending}
+              onClick={() =>
+                setPlayed.mutate(
+                  { itemId: item.Id!, played: true },
+                  { onSuccess: onClose }
+                )
+              }
+            >
+              Mark as watched
+            </Button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}

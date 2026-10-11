@@ -8,7 +8,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/jellyfin-web/**'
+      - 'packages/web/**'
       - 'packages/ui/**'
   workflow_dispatch:
 
@@ -31,8 +31,10 @@ jobs:
         include:
           - app: desktop
             label: desktop
-          - app: tv
+          - app: smart-tv
             label: TV
+          - app: android
+            label: Android
     env:
       # A token of its own lets the pull request run CI, as release-please's do.
       GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
@@ -55,7 +57,8 @@ jobs:
             base=$tag
           fi
           # A commit that also touched the app already counts towards its release.
-          for commit in $(git log --reverse --format=%H "$base..HEAD" -- packages/jellyfin-web packages/ui); do
+          # packages/jellyfin-web is where the web app lived before it was renamed.
+          for commit in $(git log --reverse --format=%H "$base..HEAD" -- packages/web packages/jellyfin-web packages/ui); do
             git diff-tree --no-commit-id --name-only -r "$commit" | grep -q "^packages/$APP/" && continue
             git log -1 --format=%s "$commit"
           done | grep -E '^[a-z]+(\([^)]*\))?!?: ' >changes.txt || true
