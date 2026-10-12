@@ -58,13 +58,14 @@ import {
   requestDiagnostics,
   useShellInfo,
   shellHost,
+  applyLabel,
   applyUpdate,
   checkForUpdates,
+  updateStatus,
   useUpdateState,
   chooseExternalPlayer,
   useExternalPlayers,
   type ShellInfo,
-  type UpdateState,
 } from '../lib/hosts/shell';
 import {
   checkDiscord,
@@ -910,28 +911,6 @@ const CHANNEL_LABELS: Record<AudioChannels, string> = {
   '7.1': '7.1 surround',
 };
 
-function updateStatus(update: UpdateState | null): string {
-  const android = appBridge()?.platform === 'android';
-  switch (update?.state) {
-    case undefined:
-      return 'Not checked yet.';
-    case 'off':
-      return 'This copy does not update itself.';
-    case 'checking':
-      return 'Checking\u2026';
-    case 'downloading':
-      return `Downloading version ${update.version}\u2026`;
-    case 'ready':
-      return android
-        ? `Version ${update.version} is ready to install.`
-        : `Version ${update.version} installs on the next start.`;
-    case 'current':
-      return 'Up to date.';
-    case 'error':
-      return `Could not check: ${update.error}`;
-  }
-}
-
 function UpdatesCard() {
   const [setting, setSetting] = useSetting(settings.desktop.updateChannel);
   const update = useUpdateState();
@@ -954,7 +933,7 @@ function UpdatesCard() {
       <SettingsRow label="Status" help={updateStatus(update)}>
         {update?.state === 'ready' ? (
           <Button intent="white" className={button} onClick={applyUpdate}>
-            {appBridge()?.platform === 'android' ? 'Install' : 'Restart now'}
+            {applyLabel()}
           </Button>
         ) : (
           <Button
@@ -1875,6 +1854,7 @@ function AccountSection() {
   const users = usePickableUsers();
   const avatar = users.data?.find((u) => u.user.Id === user.Id)?.avatar ?? null;
   const several = (users.data?.length ?? 0) > 1;
+  const [askWho, setAskWho] = useSetting(settings.askWho);
   const configure = configureUrl(client.base, info);
   const confirmSignOut = useConfirmationDialog({
     title: 'Sign out',
@@ -1950,6 +1930,17 @@ function AccountSection() {
           </SettingsRow>
         )}
       </SettingsCard>
+      {several && (
+        <SettingsCard title="Who's watching" description={ON_DEVICE}>
+          <Switch
+            side="right"
+            label="Ask when the app opens"
+            help="Also when you come back to it after half an hour. A user with a PIN is always asked for it then."
+            value={askWho}
+            onValueChange={setAskWho}
+          />
+        </SettingsCard>
+      )}
       <ConfirmationDialog {...confirmSignOut} />
     </>
   );

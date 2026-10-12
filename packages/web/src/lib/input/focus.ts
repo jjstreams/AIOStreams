@@ -282,6 +282,28 @@ function candidates(
   });
 }
 
+/** In a `data-nav-row`, whose cards lie in their order, the next one that way. */
+function along(
+  from: HTMLElement,
+  rect: DOMRect,
+  dir: Direction
+): HTMLElement | null {
+  const row = from.closest('[data-nav-row]');
+  if (!row) return null;
+  const all = [...row.querySelectorAll<HTMLElement>(FOCUSABLE)];
+  const at = all.indexOf(from);
+  if (at < 0) return null;
+  const step = dir === 'right' ? 1 : -1;
+  for (let i = at + step; i >= 0 && i < all.length; i += step) {
+    if (ruledOut(all[i])) continue;
+    const to = rectOf(all[i]);
+    return distance(rect, to, dir)?.inLine && canFocus(all[i], to)
+      ? all[i]
+      : null;
+  }
+  return null;
+}
+
 function nearest(
   root: Element,
   from: HTMLElement,
@@ -291,6 +313,8 @@ function nearest(
   // Sideways keeps to its own line, so focus stops at a row's end.
   const sideways = dir === 'left' || dir === 'right';
   const rect = rectOf(from);
+  const next = sideways && !everything ? along(from, rect, dir) : null;
+  if (next) return next;
   const scored: Candidate[] = [];
   const els = everything
     ? [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
@@ -394,6 +418,23 @@ function barGap(
           ? b.top - a.bottom
           : a.top - b.bottom;
   return gap >= -1 ? gap : null;
+}
+
+/** A `data-nav-wait` box, as a row still loading, lies that way before `to`. */
+function waitsFor(
+  root: Element,
+  rect: DOMRect,
+  to: HTMLElement | null,
+  dir: Direction
+): boolean {
+  const boxes = root.querySelectorAll('[data-nav-wait]');
+  if (!boxes.length) return false;
+  const past = to && distance(rect, rectOf(to), dir);
+  for (const box of boxes) {
+    const way = distance(rect, settled(box, box.getBoundingClientRect()), dir);
+    if (way?.inLine && (!past || way.gap < past.gap)) return true;
+  }
+  return false;
 }
 
 /**
@@ -678,12 +719,12 @@ export function move(dir: Direction): boolean {
     if (x || y) drifts.push([box, x, y]);
   }
   // Any other way stays in such a box, as what it covers lies beside it.
-  const near =
-    back && canFocus(back)
-      ? back
-      : nearest(exit && !out ? exit : root, from, dir);
+  const within = exit && !out ? exit : root;
+  const near = back && canFocus(back) ? back : nearest(within, from, dir);
+  const wait = waitsFor(within, rectOf(from), near, dir);
   bars = null;
   drifts = [];
+  if (wait) return true;
   const grid = from.closest('[data-nav-wrap]');
   if (!near || (grid && near !== back && !grid.contains(near))) {
     const next = wrapped(from, dir);

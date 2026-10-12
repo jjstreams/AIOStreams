@@ -22,6 +22,7 @@ import { delayLabel } from '../../lib/subtitles/delay';
 import { useLatest } from '../../lib/use-latest';
 import type { BaseItemDto, MediaSegmentDto } from '../../lib/types';
 import { ControlButton, MiddleButton, PlayerAction } from './buttons';
+import { EpisodesSheet } from './episodes';
 import {
   ScrubReadout,
   SpeedPill,
@@ -58,7 +59,8 @@ export function PlayerControls({
   onVersions,
   onPrevious,
   onNext,
-  loadingEpisode,
+  onEpisode,
+  loadingEpisode = null,
   offeringNext = false,
 }: {
   item: BaseItemDto;
@@ -68,7 +70,8 @@ export function PlayerControls({
   onVersions?: () => void;
   onPrevious?: () => void;
   onNext?: () => void;
-  loadingEpisode?: 'previous' | 'next' | null;
+  onEpisode?: (episode: BaseItemDto) => void;
+  loadingEpisode?: string | null;
   offeringNext?: boolean;
 }) {
   const { state } = player;
@@ -89,6 +92,7 @@ export function PlayerControls({
     resume: boolean;
   } | null>(null);
   const [byEar, setByEar] = React.useState(false);
+  const [episodes, setEpisodes] = React.useState(false);
   const [scrub, setScrub] = React.useState<{
     fromMs: number;
     toMs: number;
@@ -105,6 +109,7 @@ export function PlayerControls({
         !state.started ||
         picking !== null ||
         byEar ||
+        episodes ||
         scrub !== null));
   useWindowButtons(visible);
   useFocusInside(root, visible, wake);
@@ -119,7 +124,7 @@ export function PlayerControls({
   };
 
   const [seekStep] = useSetting(settings.seekStep);
-  const burstSeek = useBurstSeek(player);
+  const [burstSeek, seekingTo] = useBurstSeek(player);
   const seekBy = (deltaMs: number) => {
     burstSeek(deltaMs);
     showSeekFlash(deltaMs);
@@ -221,6 +226,7 @@ export function PlayerControls({
     visible ? 'opacity-100 [&>*]:pointer-events-auto' : 'opacity-0'
   );
   const isEpisode = item.Type === 'Episode';
+  const listsEpisodes = isEpisode && !!item.SeriesId && !!onEpisode;
   const spinner = <LuLoaderCircle className="animate-spin" />;
   const buttons: Record<string, Transport | false> = {
     previous: isEpisode && {
@@ -276,11 +282,13 @@ export function PlayerControls({
         {b.icon}
       </ControlButton>
     );
+  const shownAt = scrub?.toMs ?? seekingTo;
   const time = (
     <PlayerTime
       playhead={player.playhead}
       durationMs={state.durationMs}
       live={visible}
+      atMs={shownAt}
     />
   );
 
@@ -470,10 +478,11 @@ export function PlayerControls({
           durationMs={state.durationMs}
           segments={segments}
           chapters={player.chapters ?? []}
-          previewMs={scrub?.toMs ?? null}
+          previewMs={shownAt}
           handle={touch}
           onSeek={player.seek}
           onStep={(direction) => seekBy(direction * seekStep * 1000)}
+          onTogglePlay={togglePlay}
         />
         <div className="flex items-center gap-1">
           <div className={cn('hidden items-center gap-1', !touch && 'lg:flex')}>
@@ -500,6 +509,7 @@ export function PlayerControls({
             player={player}
             onMenu={onMenu}
             onVersions={onVersions}
+            onEpisodes={listsEpisodes ? () => setEpisodes(true) : undefined}
             onAddFile={() => fileInput.current?.click()}
             onSyncByEar={() => setByEar(true)}
             onSyncToLine={pickLine}
@@ -507,6 +517,16 @@ export function PlayerControls({
           />
         </div>
       </div>
+
+      {listsEpisodes && (
+        <EpisodesSheet
+          item={item}
+          open={episodes}
+          loadingId={loadingEpisode}
+          onPlay={onEpisode}
+          onClose={() => setEpisodes(false)}
+        />
+      )}
 
       {locked && (
         <ScreenLock
@@ -586,10 +606,13 @@ function PlayerTime({
   playhead,
   durationMs,
   live,
+  atMs,
 }: {
   playhead: Playhead;
   durationMs: number;
   live: boolean;
+  /** Shown in place of the playhead, as a seek is under way. */
+  atMs: number | null;
 }) {
   const seconds = usePlayhead(
     playhead,
@@ -598,7 +621,7 @@ function PlayerTime({
   );
   return (
     <>
-      {clock(seconds * 1000)}
+      {clock(atMs ?? seconds * 1000)}
       {durationMs > 0 && (
         <span className="text-gray-400"> / {clock(durationMs)}</span>
       )}

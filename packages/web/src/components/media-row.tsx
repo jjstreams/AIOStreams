@@ -10,6 +10,7 @@ import {
 } from '@aiostreams/ui/carousel';
 import { Skeleton } from '@aiostreams/ui/skeleton';
 import { cn } from '@aiostreams/ui/core/styling';
+import { useMediaQuery } from '@aiostreams/ui/hooks/media-query';
 import { currentHost } from '../lib/hosts';
 import {
   settings,
@@ -18,7 +19,7 @@ import {
   type PosterSize,
 } from '../lib/settings';
 import { RowScroller, ScrollRoot, watch } from '../lib/use-in-view';
-import { GLIDE_MS } from '../lib/input/glide';
+import { easeLayer } from '../lib/input/glide';
 
 /**
  * Each shape's card width, narrowed where a box sets `--row-card-h` so its
@@ -193,11 +194,12 @@ function useMarkOutOfView(
   box: React.RefObject<HTMLElement | null>,
   count: number,
   root: React.RefObject<Element | null> | Element | null,
-  rootMargin?: string
+  rootMargin?: string,
+  enabled = true
 ) {
   React.useEffect(() => {
     const cards = box.current?.children;
-    if (!cards) return;
+    if (!cards || !enabled) return;
     const stops = [...cards].map((card) =>
       watch(
         card,
@@ -207,7 +209,7 @@ function useMarkOutOfView(
       )
     );
     return () => stops.forEach((stop) => stop());
-  }, [box, count, root, rootMargin]);
+  }, [box, count, root, rootMargin, enabled]);
 }
 
 const savedScroll = new Map<string, number>();
@@ -216,16 +218,9 @@ const savedScroll = new Map<string, number>();
 const ROOM = 16;
 
 /**
- * Layers the glides take turns on, as nested transforms add up: a glide under
- * way carries on, where reading its place back comes out stale and jerks the
- * row. Three cover a held key's repeats.
- */
-const GLIDE_LAYERS = 3;
-
-/**
- * A TV's row: a plain scroller, as Embla's measuring and scripted easing are
- * too much for a TV's CPU. Focus jumps it, and an animated transform eases the
- * jump on the compositor.
+ * A TV's or touch screen's row: a plain scroller, as Embla's measuring and
+ * scripted easing are too much for a TV's CPU and stutter a swipe. Focus jumps
+ * it, and an animated transform eases the jump on the compositor.
  */
 function NativeRow({
   restoreKey,
@@ -246,7 +241,7 @@ function NativeRow({
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
   const content = React.useRef<HTMLDivElement>(null);
-  const layers = React.useRef<HTMLDivElement[]>([]);
+  const layer = React.useRef<HTMLDivElement>(null);
   React.useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -262,8 +257,6 @@ function NativeRow({
     const el = ref.current;
     const row = content.current;
     if (!el || !row) return;
-    const glides: (Animation | undefined)[] = [];
-    let next = 0;
     const follow = (e: FocusEvent) => {
       const card =
         e.target instanceof Element
@@ -282,20 +275,10 @@ function NativeRow({
             : from;
       if (to === from) return;
       el.scrollLeft = to;
-      const moved = el.scrollLeft - from;
-      const layer = layers.current[next];
-      glides[next]?.finish();
-      glides[next] = layer?.animate(
-        [{ transform: `translateX(${moved}px)` }, { transform: 'none' }],
-        { duration: GLIDE_MS, easing: 'ease-out' }
-      );
-      next = (next + 1) % GLIDE_LAYERS;
+      if (layer.current) easeLayer(layer.current, 'X', el.scrollLeft - from);
     };
     el.addEventListener('focusin', follow);
-    return () => {
-      for (const glide of glides) glide?.cancel();
-      el.removeEventListener('focusin', follow);
-    };
+    return () => el.removeEventListener('focusin', follow);
   }, []);
   React.useEffect(() => {
     const el = ref.current;
@@ -330,30 +313,21 @@ function NativeRow({
       el.removeEventListener('scroll', check);
     };
   }, [restoreKey, onEnd, onView, count]);
-  useMarkOutOfView(content, count, ref);
+  useMarkOutOfView(content, count, ref, undefined, !!currentHost().tv);
   return (
     <div
       ref={ref}
       data-nav-self-scroll
       className={cn(
         CarouselAnatomy.content(),
-        'relative -mr-4 overflow-x-auto overflow-y-hidden lg:-mr-10'
+        'relative -mr-4 overflow-x-auto overflow-y-hidden [scrollbar-width:none] lg:-mr-10 [&::-webkit-scrollbar]:hidden'
       )}
     >
-      {Array.from({ length: GLIDE_LAYERS }).reduceRight<React.ReactNode>(
-        (inside, _, i) => (
-          <div
-            ref={(el) => {
-              if (el) layers.current[i] = el;
-            }}
-            // Kept as layers, since one made as a glide starts draws nothing for a frame.
-            className="will-change-transform"
-          >
-            {inside}
-          </div>
-        ),
+      {/* Kept as a layer, since one made as a glide starts draws nothing for a frame. */}
+      <div ref={layer} className="will-change-transform">
         <div
           ref={content}
+          data-nav-row
           className={cn(
             CarouselAnatomy.innerContent({ gap: 'md' }),
             // A scroller leaves the last card's margin out of its end.
@@ -362,7 +336,7 @@ function NativeRow({
         >
           <RowScroller.Provider value={ref}>{children}</RowScroller.Provider>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -391,7 +365,7 @@ export function MediaRow({
   /** Replaces the shape's card width, for rows of something else. */
   itemClass?: string;
   loading?: boolean;
-  /** Not fetching yet, so its placeholders hold still rather than pulse unseen. */
+  /** Not fetching yet, out of sight, so one still placeholder holds its place. */
   waiting?: boolean;
   loadingMore?: boolean;
   onEndReached?: () => void;
@@ -407,8 +381,10 @@ export function MediaRow({
   const width = itemClass ?? ITEM_WIDTH[shape];
   const items = React.Children.toArray(children);
   const { drawn, fades, onView } = useWindow(items.length, start, !!loading);
+  // A finger scrolls a plain scroller on the compositor; Embla is for a mouse to drag.
+  const touch = useMediaQuery('(pointer: coarse)');
   if (!loading && !items.length) return null;
-  const native = !!currentHost().tv;
+  const native = !!currentHost().tv || touch;
   const skeletons = (count: number) =>
     Array.from({ length: count }, (_, i) => (
       <Slide key={`skeleton-${i}`} className={width}>
@@ -423,7 +399,7 @@ export function MediaRow({
     ));
   const cards = [
     ...(loading
-      ? skeletons(8)
+      ? skeletons(waiting ? 1 : 8)
       : items.map((child, i) =>
           drawn(i) ? (
             <Slide key={i} className={width}>

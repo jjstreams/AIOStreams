@@ -14,14 +14,6 @@ import {
 } from 'react-icons/bi';
 import { Badge } from '@aiostreams/ui/badge';
 import { Button, IconButton } from '@aiostreams/ui/button';
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-  useCarousel,
-} from '@aiostreams/ui/carousel';
 import { Modal } from '@aiostreams/ui/modal';
 import { Skeleton } from '@aiostreams/ui/skeleton';
 import { Tooltip } from '@aiostreams/ui/tooltip';
@@ -77,6 +69,7 @@ import {
   upToIndex,
 } from '../components/episodes';
 import { ItemMenu } from '../components/item-menu';
+import { SeasonPills } from '../components/season-pills';
 import { RatingButton } from '../components/rating';
 import { ExternalLinks } from '../components/external-links';
 import { CastAndCrew } from '../components/people';
@@ -252,7 +245,7 @@ function Dot() {
   );
 }
 
-function MetaRow({ item }: { item: BaseItemDto }) {
+const MetaRow = React.memo(function MetaRow({ item }: { item: BaseItemDto }) {
   const parts: [string, React.ReactNode][] = [];
   const start = item.ProductionYear;
   const end = item.EndDate ? new Date(item.EndDate).getFullYear() : null;
@@ -304,7 +297,7 @@ function MetaRow({ item }: { item: BaseItemDto }) {
       ))}
     </div>
   );
-}
+});
 
 /** The show's links, with the selected season's own in place of the show's. */
 function linksFor(item: BaseItemDto, season?: BaseItemDto) {
@@ -320,9 +313,6 @@ function linksFor(item: BaseItemDto, season?: BaseItemDto) {
 function Header({ item, season }: { item: BaseItemDto; season?: BaseItemDto }) {
   const { client } = useSession();
   const picker = useVersionPicker();
-  const setPlayed = useSetPlayed();
-  const setFavorite = useSetFavorite();
-  const setDropped = useSetDropped();
   const nextUp = useNextUpFor(item.Id!, item.Type === 'Series');
   const nextUpLater = useNextUpLater(item.Id!);
   // Play holds its place, and focus, while a show's next episode is on its way.
@@ -330,11 +320,11 @@ function Header({ item, season }: { item: BaseItemDto; season?: BaseItemDto }) {
   const logo = logoUrl(client, item, { maxWidth: 416 });
   const [logoFailed, setLogoFailed] = React.useState(false);
   const poster = posterUrl(client, item, { maxWidth: 320 });
-  const played = !!item.UserData?.Played;
-  const favorite = !!item.UserData?.IsFavorite;
-  const dropped = item.UserData?.Likes === false;
-  const canDrop = useFeature('dropped');
-  const links = linksFor(item, season);
+  const links = React.useMemo(() => linksFor(item, season), [item, season]);
+  const overviewImage = React.useMemo(
+    () => landscapeUrls(client, item, { maxWidth: 480 }),
+    [client, item]
+  );
   const trailer = item.RemoteTrailers?.[0]?.Url;
 
   const target =
@@ -420,7 +410,7 @@ function Header({ item, season }: { item: BaseItemDto; season?: BaseItemDto }) {
             .filter(Boolean)
             .join(' · ')}
           overview={item.Overview}
-          image={landscapeUrls(client, item, { maxWidth: 480 })}
+          image={overviewImage}
           clampClass="max-h-[4lh]"
           className="text-sm leading-relaxed text-gray-300 sm:text-base"
         />
@@ -489,67 +479,13 @@ function Header({ item, season }: { item: BaseItemDto; season?: BaseItemDto }) {
               Trailer
             </Button>
           )}
-          {item.Type !== 'BoxSet' && (
-            <Tooltip
-              trigger={
-                <IconButton
-                  data-ui="item-action"
-                  data-name="watched"
-                  data-active={played || undefined}
-                  intent={played ? 'primary-subtle' : 'gray-subtle'}
-                  className="rounded-full"
-                  icon={<BiCheck />}
-                  aria-label={played ? 'Mark unwatched' : 'Mark watched'}
-                  loading={setPlayed.isPending}
-                  onClick={() =>
-                    setPlayed.mutate({ itemId: item.Id!, played: !played })
-                  }
-                />
-              }
-            >
-              {played ? 'Mark unwatched' : 'Mark watched'}
-            </Tooltip>
-          )}
-          <Tooltip
-            trigger={
-              <IconButton
-                data-ui="item-action"
-                data-name="favourite"
-                data-active={favorite || undefined}
-                intent={favorite ? 'alert-subtle' : 'gray-subtle'}
-                className="rounded-full"
-                icon={favorite ? <BiSolidHeart /> : <BiHeart />}
-                aria-label={favorite ? 'Remove favourite' : 'Add favourite'}
-                loading={setFavorite.isPending}
-                onClick={() =>
-                  setFavorite.mutate({ itemId: item.Id!, favorite: !favorite })
-                }
-              />
-            }
-          >
-            {favorite ? 'Remove favourite' : 'Add favourite'}
-          </Tooltip>
-          {canDrop && item.Type === 'Series' && (
-            <Tooltip
-              trigger={
-                <IconButton
-                  data-ui="item-action"
-                  data-name="drop"
-                  data-active={dropped || undefined}
-                  intent={dropped ? 'warning-subtle' : 'gray-subtle'}
-                  className="rounded-full"
-                  icon={dropped ? <BiSolidDislike /> : <BiDislike />}
-                  aria-label={dropped ? 'Undrop show' : 'Drop show'}
-                  loading={setDropped.isPending}
-                  onClick={() =>
-                    setDropped.mutate({ itemId: item.Id!, dropped: !dropped })
-                  }
-                />
-              }
-            >
-              {dropped ? 'Undrop show' : 'Drop show'}
-            </Tooltip>
-          )}
+          <ItemToggles
+            itemId={item.Id!}
+            type={item.Type}
+            played={!!item.UserData?.Played}
+            favorite={!!item.UserData?.IsFavorite}
+            dropped={item.UserData?.Likes === false}
+          />
           {(item.Type === 'Movie' || item.Type === 'Series') && (
             <RatingButton item={item} />
           )}
@@ -574,6 +510,85 @@ function Header({ item, season }: { item: BaseItemDto; season?: BaseItemDto }) {
     </div>
   );
 }
+
+// Apart from the header, which redraws as the next episode and the season arrive.
+const ItemToggles = React.memo(function ItemToggles({
+  itemId,
+  type,
+  played,
+  favorite,
+  dropped,
+}: {
+  itemId: string;
+  type: BaseItemDto['Type'];
+  played: boolean;
+  favorite: boolean;
+  dropped: boolean;
+}) {
+  const setPlayed = useSetPlayed();
+  const setFavorite = useSetFavorite();
+  const setDropped = useSetDropped();
+  const canDrop = useFeature('dropped');
+  return (
+    <>
+      {type !== 'BoxSet' && (
+        <Tooltip
+          trigger={
+            <IconButton
+              data-ui="item-action"
+              data-name="watched"
+              data-active={played || undefined}
+              intent={played ? 'primary-subtle' : 'gray-subtle'}
+              className="rounded-full"
+              icon={<BiCheck />}
+              aria-label={played ? 'Mark unwatched' : 'Mark watched'}
+              loading={setPlayed.isPending}
+              onClick={() => setPlayed.mutate({ itemId, played: !played })}
+            />
+          }
+        >
+          {played ? 'Mark unwatched' : 'Mark watched'}
+        </Tooltip>
+      )}
+      <Tooltip
+        trigger={
+          <IconButton
+            data-ui="item-action"
+            data-name="favourite"
+            data-active={favorite || undefined}
+            intent={favorite ? 'alert-subtle' : 'gray-subtle'}
+            className="rounded-full"
+            icon={favorite ? <BiSolidHeart /> : <BiHeart />}
+            aria-label={favorite ? 'Remove favourite' : 'Add favourite'}
+            loading={setFavorite.isPending}
+            onClick={() => setFavorite.mutate({ itemId, favorite: !favorite })}
+          />
+        }
+      >
+        {favorite ? 'Remove favourite' : 'Add favourite'}
+      </Tooltip>
+      {canDrop && type === 'Series' && (
+        <Tooltip
+          trigger={
+            <IconButton
+              data-ui="item-action"
+              data-name="drop"
+              data-active={dropped || undefined}
+              intent={dropped ? 'warning-subtle' : 'gray-subtle'}
+              className="rounded-full"
+              icon={dropped ? <BiSolidDislike /> : <BiDislike />}
+              aria-label={dropped ? 'Undrop show' : 'Drop show'}
+              loading={setDropped.isPending}
+              onClick={() => setDropped.mutate({ itemId, dropped: !dropped })}
+            />
+          }
+        >
+          {dropped ? 'Undrop show' : 'Drop show'}
+        </Tooltip>
+      )}
+    </>
+  );
+});
 
 /**
  * The next episode of a show still airing, from its latest season, which is
@@ -646,7 +661,6 @@ function Seasons({
   focusEpisodeId?: string;
   onSeason: (season: BaseItemDto | undefined) => void;
 }) {
-  const { client } = useSession();
   const [layoutPref] = useSetting(settings.episodeLayout);
   const wide = useMediaQuery('(min-width: 1024px)');
   const layout = layoutPref === 'auto' ? (wide ? 'row' : 'list') : layoutPref;
@@ -660,13 +674,16 @@ function Seasons({
     if (!chosen && settled && fallback) setChosen(fallback);
   }, [chosen, settled, fallback]);
   const seasonId = chosen ?? fallback;
-  const pick = (id: string) => {
-    setChosen(id);
-    navigate(`${to.item(series.Id!)}?season=${id}`, {
-      replace: true,
-      keepScroll: true,
-    });
-  };
+  const pick = React.useCallback(
+    (id: string) => {
+      setChosen(id);
+      navigate(`${to.item(series.Id!)}?season=${id}`, {
+        replace: true,
+        keepScroll: true,
+      });
+    },
+    [series.Id]
+  );
   const season = list.find((s) => s.Id === seasonId);
   React.useEffect(() => onSeason(season), [season, onSeason]);
   React.useEffect(() => () => onSeason(undefined), [onSeason]);
@@ -709,70 +726,7 @@ function Seasons({
   return (
     <Section name="episodes" title={ownPosters ? undefined : 'Episodes'}>
       {ownPosters ? (
-        <MediaRow
-          id="seasons"
-          title="Episodes"
-          shape="poster"
-          itemClass="basis-[7rem] sm:basis-[8rem] lg:basis-[8.5rem]"
-        >
-          {list.map((s) => {
-            const selected = s.Id === seasonId;
-            const poster = posterUrl(client, s, { maxWidth: 120 });
-            return (
-              <ItemMenu key={s.Id} item={s} onPage>
-                <button
-                  type="button"
-                  data-ui="season-poster"
-                  data-selected={selected || undefined}
-                  data-focus="own"
-                  onClick={() => pick(s.Id!)}
-                  className="group/season w-full space-y-2 text-left"
-                >
-                  <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-gray-900">
-                    {poster && (
-                      <CachedImage
-                        src={poster}
-                        alt=""
-                        loading="lazy"
-                        className={cn(
-                          'absolute inset-0 h-full w-full object-cover transition-opacity [transition-duration:250ms]',
-                          !selected &&
-                            'opacity-60 group-hover/season:opacity-100 group-focus-visible/season:opacity-100'
-                        )}
-                      />
-                    )}
-                    <FocusRing className="group-focus-visible/season:opacity-100" />
-                    {/* Drawn inside, since the row clips anything outside it. */}
-                    <span
-                      className={cn(
-                        'pointer-events-none absolute inset-0 rounded-lg ring-inset',
-                        selected ? 'ring-2 ring-white' : 'ring-1 ring-white/10'
-                      )}
-                    />
-                    {s.UserData?.Played && (
-                      <span
-                        data-ui="watched-badge"
-                        className="absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-brand-500 text-white"
-                      >
-                        <BiCheck />
-                      </span>
-                    )}
-                  </div>
-                  <p
-                    className={cn(
-                      'truncate text-sm',
-                      selected
-                        ? 'font-semibold text-white'
-                        : 'text-[--muted] group-hover/season:text-white group-focus-visible/season:text-white'
-                    )}
-                  >
-                    {s.Name}
-                  </p>
-                </button>
-              </ItemMenu>
-            );
-          })}
-        </MediaRow>
+        <SeasonPosters seasons={list} selected={seasonId} onSelect={pick} />
       ) : (
         <SeasonPills seasons={list} selected={seasonId} onSelect={pick} />
       )}
@@ -787,7 +741,14 @@ function Seasons({
       {layout === 'list' && summaryLine}
       {layout === 'row' ? (
         loading ? (
-          <MediaRow key="loading" shape="wide" itemClass={ROW_WIDTH} loading />
+          <div data-nav-wait>
+            <MediaRow
+              key="loading"
+              shape="wide"
+              itemClass={ROW_WIDTH}
+              loading
+            />
+          </div>
         ) : (
           <div ref={focusIndex >= 0 ? focused : undefined}>
             <MediaRow
@@ -819,7 +780,9 @@ function Seasons({
           </div>
         )
       ) : loading ? (
-        <EpisodeListSkeleton columns />
+        <div data-nav-wait>
+          <EpisodeListSkeleton columns />
+        </div>
       ) : (
         <EpisodeList
           episodes={items}
@@ -836,125 +799,84 @@ function Seasons({
 const ROW_WIDTH =
   'basis-[85%] sm:basis-[20rem] lg:basis-[22rem] 2xl:basis-[24rem]';
 
-function SeasonPills({
+// Apart from the episodes below, which redraw as they arrive and as the season settles.
+const SeasonPosters = React.memo(function SeasonPosters({
   seasons,
   selected,
   onSelect,
 }: {
   seasons: BaseItemDto[];
-  selected: string | undefined;
+  selected?: string;
   onSelect: (id: string) => void;
 }) {
-  const pills = seasons.map((s) => (
-    <ItemMenu key={s.Id} item={s} onPage>
-      <Button
-        data-ui="season-pill"
-        data-selected={s.Id === selected || undefined}
-        size="sm"
-        intent={s.Id === selected ? 'white' : 'gray-subtle'}
-        className="rounded-full"
-        rightIcon={s.UserData?.Played ? <BiCheck /> : undefined}
-        iconSpacing="0.25rem"
-        onClick={() => onSelect(s.Id!)}
-      >
-        {s.Name}
-      </Button>
-    </ItemMenu>
-  ));
-  // Embla watches its slides with an intersection observer (see lib/use-in-view.ts).
-  if (currentHost().tv) return <TvPills selected={selected}>{pills}</TvPills>;
+  const { client } = useSession();
   return (
-    <Carousel
-      gap="sm"
-      opts={{ align: 'start', dragFree: true, slidesToScroll: 'auto' }}
-      className="flex items-center gap-2"
+    <MediaRow
+      id="seasons"
+      title="Episodes"
+      shape="poster"
+      itemClass="basis-[7rem] sm:basis-[8rem] lg:basis-[8.5rem]"
     >
-      <PillArrow
-        arrow="prev"
-        follow={seasons.findIndex((s) => s.Id === selected)}
-      />
-      <PillTrack>
-        {pills.map((pill) => (
-          <CarouselItem key={pill.key} className="basis-auto">
-            {pill}
-          </CarouselItem>
-        ))}
-      </PillTrack>
-      <PillArrow arrow="next" />
-    </Carousel>
+      {seasons.map((s) => {
+        const isSelected = s.Id === selected;
+        const poster = posterUrl(client, s, { maxWidth: 120 });
+        return (
+          <ItemMenu key={s.Id} item={s} onPage>
+            <button
+              type="button"
+              data-ui="season-poster"
+              data-selected={isSelected || undefined}
+              data-focus="own"
+              onClick={() => onSelect(s.Id!)}
+              className="group/season w-full space-y-2 text-left"
+            >
+              <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-gray-900">
+                {poster && (
+                  <CachedImage
+                    src={poster}
+                    alt=""
+                    loading="lazy"
+                    className={cn(
+                      'absolute inset-0 h-full w-full object-cover transition-opacity [transition-duration:250ms]',
+                      !isSelected &&
+                        'opacity-60 group-hover/season:opacity-100 group-focus-visible/season:opacity-100'
+                    )}
+                  />
+                )}
+                <FocusRing className="group-focus-visible/season:opacity-100" />
+                {/* Drawn inside, since the row clips anything outside it. */}
+                <span
+                  className={cn(
+                    'pointer-events-none absolute inset-0 rounded-lg ring-inset',
+                    isSelected ? 'ring-2 ring-white' : 'ring-1 ring-white/10'
+                  )}
+                />
+                {s.UserData?.Played && (
+                  <span
+                    data-ui="watched-badge"
+                    className="absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-brand-500 text-white"
+                  >
+                    <BiCheck />
+                  </span>
+                )}
+              </div>
+              <p
+                className={cn(
+                  'truncate text-sm',
+                  isSelected
+                    ? 'font-semibold text-white'
+                    : 'text-[--muted] group-hover/season:text-white group-focus-visible/season:text-white'
+                )}
+              >
+                {s.Name}
+              </p>
+            </button>
+          </ItemMenu>
+        );
+      })}
+    </MediaRow>
   );
-}
-
-/** Starts scrolled to the selected pill. */
-function TvPills({
-  selected,
-  children,
-}: {
-  selected: string | undefined;
-  children: React.ReactNode;
-}) {
-  const track = React.useRef<HTMLDivElement>(null);
-  React.useLayoutEffect(() => {
-    const el = track.current;
-    const pill = el?.querySelector<HTMLElement>('[data-selected]');
-    if (!el || !pill) return;
-    if (
-      pill.offsetLeft < el.scrollLeft ||
-      pill.offsetLeft + pill.offsetWidth > el.scrollLeft + el.clientWidth
-    )
-      el.scrollLeft = pill.offsetLeft;
-  }, [selected]);
-  return (
-    <div ref={track} className="relative flex gap-2 overflow-x-auto">
-      {children}
-    </div>
-  );
-}
-
-/** `follow` scrolls that pill into view when it is out of it. */
-function PillArrow({
-  arrow,
-  follow,
-}: {
-  arrow: 'prev' | 'next';
-  follow?: number;
-}) {
-  const { api, canScrollPrev, canScrollNext } = useCarousel();
-  React.useEffect(() => {
-    if (!api || follow == null || follow < 0) return;
-    const node = api.slideNodes()[follow];
-    if (!node) return;
-    const root = api.rootNode().getBoundingClientRect();
-    const rect = node.getBoundingClientRect();
-    if (rect.left < root.left || rect.right > root.right) {
-      api.scrollTo(Math.min(follow, api.scrollSnapList().length - 1));
-    }
-  }, [api, follow]);
-  if (!canScrollPrev && !canScrollNext) return null;
-  const Arrow = arrow === 'prev' ? CarouselPrevious : CarouselNext;
-  return (
-    <Arrow className="hidden flex-none disabled:opacity-30 md:inline-flex" />
-  );
-}
-
-function PillTrack({ children }: { children: React.ReactNode }) {
-  const { canScrollPrev, canScrollNext } = useCarousel();
-  return (
-    <CarouselContent
-      contentClass={cn(
-        'min-w-0 flex-1',
-        canScrollPrev && canScrollNext
-          ? '[mask-image:linear-gradient(to_right,transparent,black_2.5rem,black_calc(100%-2.5rem),transparent)]'
-          : canScrollPrev
-            ? '[mask-image:linear-gradient(to_right,transparent,black_2.5rem)]'
-            : canScrollNext &&
-              '[mask-image:linear-gradient(to_left,transparent,black_2.5rem)]'
-      )}
-    >
-      {children}
-    </CarouselContent>
-  );
-}
+});
 
 function AllEpisodes({
   title,

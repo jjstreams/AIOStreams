@@ -108,12 +108,16 @@ function measureTwice(pools: Pool[]) {
   setTimeout(() => measureSoon(pools), SETTLE_MS);
 }
 
-/** A row's scroll changes only what is measured against that row or the screen. */
+/**
+ * A row's scroll changes only what is measured against that row or the screen,
+ * once its glide has settled: nearness reaches far enough ahead to wait.
+ */
 function onScroll(e: Event) {
   const scroller = e.target instanceof Element ? e.target : null;
-  measureTwice(
-    [...measured].filter((p) => p.root === scroller || p.root === null)
+  const pools = [...measured].filter(
+    (p) => p.root === scroller || p.root === null
   );
+  setTimeout(() => measureSoon(pools), SETTLE_MS);
 }
 
 let listening = false;
@@ -121,16 +125,18 @@ let listening = false;
 function listen() {
   if (listening) return;
   listening = true;
-  const all = () => {
-    layout++;
-    measureTwice([...measured]);
-  };
   document.addEventListener('scroll', onScroll, {
     capture: true,
     passive: true,
   });
-  addEventListener('resize', all);
-  addEventListener('hashchange', all);
+  addEventListener('resize', () => {
+    layout++;
+    measureTwice([...measured]);
+  });
+  addEventListener('hashchange', () => {
+    layout++;
+    measureSoon();
+  });
   new ResizeObserver(() => {
     layout++;
     measureSoon();

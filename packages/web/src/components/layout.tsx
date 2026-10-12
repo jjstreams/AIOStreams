@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import {
   Outlet,
+  useChildMatches,
   useElementScrollRestoration,
   useRouterState,
 } from '@tanstack/react-router';
@@ -52,6 +53,7 @@ import { useSession } from '../lib/session';
 import { usePickableUsers } from '../lib/queries';
 import { configureUrl, navigate, to } from '../lib/paths';
 import { currentHost } from '../lib/hosts';
+import { shellHost } from '../lib/hosts/shell';
 import { serverAddress } from '../lib/servers';
 import { useServerInfo } from '../lib/server-info';
 import { useDiscordBrowsing } from '../lib/discord';
@@ -72,7 +74,11 @@ import { VersionPickerProvider } from './version-picker';
 import { ItemMenuHost } from './item-menu';
 import { HomePage } from '../pages/home';
 import { PageShown } from '../lib/page-shown';
-import { GlideLayers } from './glide-layers';
+import { GlideLayer } from './glide-layer';
+import { UpdatePrompt } from './update-prompt';
+
+// Kept mounted under every page, so it skips the layout's render on each route change.
+const KeptHome = React.memo(HomePage);
 
 const PAGE_FADE = {
   initial: { opacity: 0, top: 6 },
@@ -465,18 +471,15 @@ export function WebLayout() {
     select: (s) => s.location.state.__TSR_key ?? s.location.href,
   });
   const onHome = pathname === '/';
-  // Home stays, hidden, while other pages are open: going back to its entry
-  // shows it again rather than building it anew. Any other visit starts afresh,
-  // and playback lets it go, to leave the player the memory.
+  // From the match the outlet shows, which can trail the location for a render.
+  const playing = useChildMatches({
+    select: (matches) => !!matches[0]?.pathname.startsWith('/play/'),
+  });
+  // Home stays, hidden, while other pages and the player are open: going back
+  // to its entry shows it again rather than building it anew. Any other visit
+  // starts afresh.
   const [kept, setKept] = React.useState<string>();
   if (onHome && kept !== entry) setKept(entry);
-  if (kept && pathname.startsWith('/play/')) setKept(undefined);
-  useDiscordBrowsing(pathname);
-  useServerEvents();
-  useDownloadRunner();
-  usePendingStops();
-  useAction('search', () => navigate(to.search()));
-  useAction('home', () => navigate(to.home));
   const activity: SidebarItem = {
     id: 'activity',
     name: 'Activity',
@@ -620,147 +623,168 @@ export function WebLayout() {
   );
 
   return (
-    <AppSidebarProvider>
-      <AppLayout
-        withSidebar={side}
-        sidebarSize={nav === 'tv-rail' && named ? 'sm' : 'slim'}
+    <>
+      {!playing && <PagesWork pathname={pathname} />}
+      <div
+        data-ui="shell"
+        inert={playing}
+        className={cn(playing && '[content-visibility:hidden]')}
       >
-        {side && (
-          <AppLayoutSidebar data-ui="sidebar">
-            {nav === 'rail' ? (
-              <TouchRail
-                items={items}
-                footerItems={[settingsItem]}
-                accountItems={accountItems}
-                named={named}
-              />
-            ) : nav === 'tv-rail' ? (
-              <TvRail
-                items={items}
-                footerItems={[settingsItem]}
-                accountItems={accountItems}
-                open={named}
-              />
-            ) : (
-              <Sidebar
-                header={<Logo />}
-                items={items}
-                belowItems={<HistoryButtons />}
-                footerItems={[settingsItem]}
-                footer={<SidebarAccount items={accountItems} />}
-              />
-            )}
-          </AppLayoutSidebar>
-        )}
-        {shape === 'floating' &&
-          (nav === 'rail' ? (
-            <TouchRail
-              items={items}
-              footerItems={[settingsItem]}
-              accountItems={accountItems}
-              named={named}
-              floating
-            />
-          ) : (
-            <TvRail
-              items={items}
-              footerItems={[settingsItem]}
-              accountItems={accountItems}
-              open={named}
-              floating
-            />
-          ))}
-        <AppLayout>
-          <AppLayoutContent
-            style={
-              nav === 'tv-top'
-                ? ({
-                    '--top-bar': TOP_BAR_HEIGHT[tvTopBar],
-                  } as React.CSSProperties)
-                : shape === 'floating'
-                  ? ({
-                      '--side-bar':
-                        FLOAT_GUTTER[nav === 'rail' ? 'touch' : 'tv'][
-                          named ? 'named' : 'icons'
-                        ],
-                    } as React.CSSProperties)
-                  : undefined
-            }
-            className={cn(
-              shape === 'corner' &&
-                (nav === 'rail'
-                  ? 'lg:[--top-bar:calc(1rem+3.875rem)]'
-                  : '[--top-bar:calc(1.5rem+3.875rem)]')
-            )}
+        <AppSidebarProvider>
+          <AppLayout
+            withSidebar={side}
+            sidebarSize={nav === 'tv-rail' && named ? 'sm' : 'slim'}
           >
-            {shape === 'corner' && (
-              <CornerMenu
-                items={items}
-                footerItems={[settingsItem]}
-                accountItems={accountItems}
-                tv={nav === 'tv-rail'}
-              />
+            {side && (
+              <AppLayoutSidebar data-ui="sidebar">
+                {nav === 'rail' ? (
+                  <TouchRail
+                    items={items}
+                    footerItems={[settingsItem]}
+                    accountItems={accountItems}
+                    named={named}
+                  />
+                ) : nav === 'tv-rail' ? (
+                  <TvRail
+                    items={items}
+                    footerItems={[settingsItem]}
+                    accountItems={accountItems}
+                    open={named}
+                  />
+                ) : (
+                  <Sidebar
+                    header={<Logo />}
+                    items={items}
+                    belowItems={<HistoryButtons />}
+                    footerItems={[settingsItem]}
+                    footer={<SidebarAccount items={accountItems} />}
+                  />
+                )}
+              </AppLayoutSidebar>
             )}
-            {nav === 'tv-top' && (
-              <TvTabs
-                style={tvTopBar}
-                items={items}
-                footerItems={[settingsItem]}
-                accountItems={accountItems}
-              />
-            )}
-            <VersionPickerProvider>
-              <ItemMenuHost>
-                <GlideLayers name="page">
-                  {kept && (
-                    <motion.div
-                      key={kept}
-                      data-page="home"
-                      {...PAGE_FADE}
-                      inert={!onHome}
-                      className={cn(
-                        page,
-                        !onHome &&
-                          'absolute inset-x-0 top-0 [content-visibility:hidden]'
+            {shape === 'floating' &&
+              (nav === 'rail' ? (
+                <TouchRail
+                  items={items}
+                  footerItems={[settingsItem]}
+                  accountItems={accountItems}
+                  named={named}
+                  floating
+                />
+              ) : (
+                <TvRail
+                  items={items}
+                  footerItems={[settingsItem]}
+                  accountItems={accountItems}
+                  open={named}
+                  floating
+                />
+              ))}
+            <AppLayout>
+              <AppLayoutContent
+                style={
+                  nav === 'tv-top'
+                    ? ({
+                        '--top-bar': TOP_BAR_HEIGHT[tvTopBar],
+                      } as React.CSSProperties)
+                    : shape === 'floating'
+                      ? ({
+                          '--side-bar':
+                            FLOAT_GUTTER[nav === 'rail' ? 'touch' : 'tv'][
+                              named ? 'named' : 'icons'
+                            ],
+                        } as React.CSSProperties)
+                      : undefined
+                }
+                className={cn(
+                  shape === 'corner' &&
+                    (nav === 'rail'
+                      ? 'lg:[--top-bar:calc(1rem+3.875rem)]'
+                      : '[--top-bar:calc(1.5rem+3.875rem)]')
+                )}
+              >
+                {shape === 'corner' && (
+                  <CornerMenu
+                    items={items}
+                    footerItems={[settingsItem]}
+                    accountItems={accountItems}
+                    tv={nav === 'tv-rail'}
+                  />
+                )}
+                {nav === 'tv-top' && (
+                  <TvTabs
+                    style={tvTopBar}
+                    items={items}
+                    footerItems={[settingsItem]}
+                    accountItems={accountItems}
+                  />
+                )}
+                <VersionPickerProvider>
+                  <ItemMenuHost>
+                    <GlideLayer name="page">
+                      {kept && (
+                        <motion.div
+                          key={kept}
+                          data-page="home"
+                          {...PAGE_FADE}
+                          inert={!onHome}
+                          className={cn(
+                            page,
+                            !onHome &&
+                              'absolute inset-x-0 top-0 [content-visibility:hidden]'
+                          )}
+                        >
+                          <PageShown.Provider value={onHome}>
+                            <KeptHome />
+                          </PageShown.Provider>
+                          {onHome && <PageScroll />}
+                        </motion.div>
                       )}
-                    >
-                      <PageShown.Provider value={onHome}>
-                        <HomePage />
-                      </PageShown.Provider>
-                      {onHome && <PageScroll />}
-                    </motion.div>
-                  )}
-                  {!onHome && (
-                    <motion.div
-                      key={pathname}
-                      data-page={pageName(pathname)}
-                      {...PAGE_FADE}
-                      className={page}
-                    >
-                      <Outlet />
-                      <PageScroll />
-                    </motion.div>
-                  )}
-                </GlideLayers>
-              </ItemMenuHost>
-            </VersionPickerProvider>
-          </AppLayoutContent>
-        </AppLayout>
-      </AppLayout>
-      {!currentHost().tv && (
-        <MobileNav
-          items={items.filter(
-            (i) => i !== calendar && i !== activity && i !== downloads
+                      {!onHome && !playing && (
+                        <motion.div
+                          key={pathname}
+                          data-page={pageName(pathname)}
+                          {...PAGE_FADE}
+                          className={page}
+                        >
+                          <Outlet />
+                          <PageScroll />
+                        </motion.div>
+                      )}
+                    </GlideLayer>
+                  </ItemMenuHost>
+                </VersionPickerProvider>
+              </AppLayoutContent>
+            </AppLayout>
+          </AppLayout>
+          {!currentHost().tv && (
+            <MobileNav
+              items={items.filter(
+                (i) => i !== calendar && i !== activity && i !== downloads
+              )}
+              places={[...(downloads ? [downloads] : []), activity, calendar]}
+              menuItems={[settingsItem, ...accountItems]}
+              wide={nav === 'bar'}
+            />
           )}
-          places={[...(downloads ? [downloads] : []), activity, calendar]}
-          menuItems={[settingsItem, ...accountItems]}
-          wide={nav === 'bar'}
-        />
-      )}
-      <ConnectionNote />
-      <ConfirmationDialog {...confirmSignOut} />
-    </AppSidebarProvider>
+          <ConnectionNote />
+          <ConfirmationDialog {...confirmSignOut} />
+        </AppSidebarProvider>
+      </div>
+      {playing && <Outlet />}
+    </>
   );
+}
+
+/** What runs while pages are open, and stops while the player is. */
+function PagesWork({ pathname }: { pathname: string }) {
+  useDiscordBrowsing(pathname);
+  useServerEvents();
+  useDownloadRunner();
+  usePendingStops();
+  useAction('search', () => navigate(to.search()));
+  useAction('home', () => navigate(to.home));
+  return shellHost() ? <UpdatePrompt /> : null;
 }
 
 function select(item: SidebarItem) {

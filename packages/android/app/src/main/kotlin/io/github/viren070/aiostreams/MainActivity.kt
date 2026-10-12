@@ -9,13 +9,13 @@ import android.app.NotificationManager
 import android.app.UiModeManager
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
-import android.speech.RecognizerIntent
 import android.util.Log
 import android.hardware.input.InputManager
 import android.view.InputDevice
@@ -26,6 +26,7 @@ import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.addCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -63,7 +64,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var controller: ListenableFuture<MediaController>
     private val screen = PlayerWindow(this)
     private val levels by lazy { Levels(this) }
-    private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    /** Run once the notification question is answered, either way. */
+    private var afterNotifications: (() -> Unit)? = null
+    private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        val next = afterNotifications
+        afterNotifications = null
+        next?.invoke()
+    }
     /** A save waiting on storage access, run either way so a refusal reports as a failure. */
     private var unsaved: (() -> Unit)? = null
     private val storage = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -80,10 +87,7 @@ class MainActivity : ComponentActivity() {
         picked?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(it.resultCode, it.data))
         picked = null
     }
-    private val listen = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val heard = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-        sendHeard(heard.takeIf { result.resultCode == RESULT_OK })
-    }
+    private val voice = Voice(this) { bridge.send(it) }
     private lateinit var frameRates: FrameRateMatch
     /** False when onCreate only showed the outdated WebView message. */
     private val started get() = ::bridge.isInitialized
@@ -91,7 +95,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!webViewUsable(this)) return setContentView(outdatedWebView(this))
-        enableEdgeToEdge()
+        // The page is dark whatever the system's theme, so the bars keep light icons.
+        val dark = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { true }
+        enableEdgeToEdge(dark, dark)
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG || BuildConfig.INSPECTABLE)
 
         playback = Playback(this) { engine ->
@@ -111,7 +117,7 @@ class MainActivity : ComponentActivity() {
         app.configure(web, ::chooseFiles, players::open)
         val queue = Downloads.queue(this)
         queue.send = { message -> runOnUiThread { bridge.send(message) } }
-        downloads = DownloadChannel(queue, onAdd = ::askForNotifications)
+        downloads = DownloadChannel(queue, onAdd = { askForNotifications() })
         frameRates = FrameRateMatch(
             this,
             hold = {
@@ -138,12 +144,12 @@ class MainActivity : ComponentActivity() {
             deviceName(),
             deviceId(),
             onTv(),
-            canListen(),
+            voice.available,
             gamepads,
             PictureInPicture.supported(this),
         )
         bridge = AppBridge(web, app.origins, identity, ::onMessage)
-        updater = Updater(this) { bridge.send(it) }
+        updater = Updater(this, ::askForNotifications) { bridge.send(it) }
         pip = PictureInPicture(this, playback.stage)
         focus = AudioFocus(
             this,
@@ -211,7 +217,8 @@ class MainActivity : ComponentActivity() {
                 message["frameRate"]?.jsonPrimitive?.booleanOrNull?.let { frameRates.enabled = it }
                 message["tunneling"]?.jsonPrimitive?.booleanOrNull?.let { playback.tunneling = it }
             }
-            "voice-search" -> listen()
+            "voice-search" -> voice.listen()
+            "voice-cancel" -> voice.cancel()
             "save-file" -> saveFile(
                 message["name"]?.jsonPrimitive?.contentOrNull ?: "aiostreams.txt",
                 message["mime"]?.jsonPrimitive?.contentOrNull ?: "text/plain",
@@ -344,17 +351,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun listen() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        try {
-            listen.launch(intent)
-        } catch (_: ActivityNotFoundException) {
-            sendHeard(null)
-        }
-    }
-
     private var gamepads = false
 
     private val controllers = object : InputManager.InputDeviceListener {
@@ -378,22 +374,16 @@ class MainActivity : ComponentActivity() {
         InputDevice.getDevice(id)?.let { !it.isVirtual && it.supportsSource(InputDevice.SOURCE_JOYSTICK) } == true
     }
 
-    private fun canListen() =
-        packageManager.queryIntentActivities(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH), 0).isNotEmpty()
-
-    private fun sendHeard(text: String?) = bridge.send(buildJsonObject {
-        put("type", "voice-result")
-        put("text", text)
-    })
-
-    /** Asked on the first download, whose progress shows in one. */
-    private fun askForNotifications() {
+    /** Asked on the first download, whose progress shows in one, and before an update. */
+    private fun askForNotifications(then: () -> Unit = {}) {
         val permission = Manifest.permission.POST_NOTIFICATIONS
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
         ) {
-            notifications.launch(permission)
+            return then()
         }
+        afterNotifications = then
+        notifications.launch(permission)
     }
 
     /** Kept by the app, as the page's storage goes with the address it loads from. */
@@ -442,6 +432,7 @@ class MainActivity : ComponentActivity() {
         if (!started) return super.onDestroy()
         getSystemService(InputManager::class.java).unregisterInputDeviceListener(controllers)
         updater.release()
+        voice.release()
         Downloads.queue(this).send = null
         MediaController.releaseFuture(controller)
         PlaybackService.player = null
