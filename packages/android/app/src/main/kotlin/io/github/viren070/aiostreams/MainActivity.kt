@@ -43,6 +43,7 @@ import io.github.viren070.aiostreams.mpv.MpvEngine
 import io.github.viren070.aiostreams.playback.PlayerChannel
 import java.io.File
 import java.util.UUID
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -53,7 +54,7 @@ import kotlinx.serialization.json.put
 
 /** The video beneath, the page over it, and the bridge between them. */
 class MainActivity : ComponentActivity() {
-    private lateinit var web: WebView
+    private lateinit var web: CompletingWebView
     private lateinit var bridge: AppBridge
     private lateinit var playback: Playback
     private lateinit var player: PlayerChannel
@@ -61,6 +62,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var updater: Updater
     private lateinit var pip: PictureInPicture
     private lateinit var focus: AudioFocus
+    private lateinit var passthrough: Passthrough
+    private val youtube = YouTube { message -> runOnUiThread { bridge.send(message) } }
     private lateinit var controller: ListenableFuture<MediaController>
     private val screen = PlayerWindow(this)
     private val levels by lazy { Levels(this) }
@@ -107,7 +110,7 @@ class MainActivity : ComponentActivity() {
             })
         }
         // Edge to edge: the page keeps clear of the system bars with its own safe-area insets.
-        web = WebView(this)
+        web = CompletingWebView(this)
         setContentView(FrameLayout(this).apply {
             addView(playback.stage, MATCH_PARENT, MATCH_PARENT)
             addView(web, MATCH_PARENT, MATCH_PARENT)
@@ -127,6 +130,7 @@ class MainActivity : ComponentActivity() {
             },
             resume = { playback.engine.setProperty("pause", "no") },
         )
+        passthrough = Passthrough(this) { player.outputChanged() }
         player = PlayerChannel(
             playback.engine,
             send = { bridge.send(it) },
@@ -136,6 +140,7 @@ class MainActivity : ComponentActivity() {
             fallBack = { playback.fallBack(player) },
             frameRate = frameRates::match,
             showVideo = playback::showVideo,
+            passthrough = passthrough::codecs,
         )
         gamepads = hasGamepad()
         getSystemService(InputManager::class.java).registerInputDeviceListener(controllers, null)
@@ -216,7 +221,15 @@ class MainActivity : ComponentActivity() {
             "player-options" -> {
                 message["frameRate"]?.jsonPrimitive?.booleanOrNull?.let { frameRates.enabled = it }
                 message["tunneling"]?.jsonPrimitive?.booleanOrNull?.let { playback.tunneling = it }
+                message["dolbyVision"]?.jsonPrimitive?.booleanOrNull?.let { playback.dolbyVision = it }
             }
+            "youtube-resolve" -> youtube.resolve(
+                message["request"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                message["id"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            )
+            "keyboard-completions" -> web.showCompletions(
+                (message["items"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
+            )
             "voice-search" -> voice.listen()
             "voice-cancel" -> voice.cancel()
             "save-file" -> saveFile(
@@ -437,6 +450,8 @@ class MainActivity : ComponentActivity() {
         MediaController.releaseFuture(controller)
         PlaybackService.player = null
         focus.release()
+        passthrough.release()
+        youtube.release()
         playback.engine.release()
         web.destroy()
         super.onDestroy()

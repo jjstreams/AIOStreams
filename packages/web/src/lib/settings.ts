@@ -372,6 +372,9 @@ export type AudioChannels = (typeof AUDIO_CHANNELS)[number];
 export const PLAYER_ENGINES = ['auto', 'mpv', 'exoplayer'] as const;
 export type PlayerEngine = (typeof PLAYER_ENGINES)[number];
 
+export const PASSTHROUGH = ['off', 'auto', 'always'] as const;
+export type Passthrough = (typeof PASSTHROUGH)[number];
+
 /** `installed` follows the channel this copy of the desktop app came from. */
 export const UPDATE_CHANNELS = ['installed', 'stable', 'nightly'] as const;
 export type UpdateChannelSetting = (typeof UPDATE_CHANNELS)[number];
@@ -578,6 +581,7 @@ export const settings = {
       AUDIO_CHANNELS
     ),
     passthrough: device<boolean>('aiostreams-desktop-passthrough', false),
+    dolbyVision: device<boolean>('aiostreams-desktop-dolby-vision', true),
     /** Read by the page only; the app itself never needs it. */
     chapterSkips: device<boolean>('aiostreams-desktop-chapter-skips', true),
   },
@@ -591,6 +595,11 @@ export const settings = {
     ),
     frameRate: device<boolean>('aiostreams-android-frame-rate', false),
     tunneling: device<boolean>('aiostreams-android-tunneling', false),
+    passthrough: device<Passthrough>(
+      'aiostreams-android-passthrough',
+      'auto',
+      PASSTHROUGH
+    ),
   },
   discord,
   discordEvents: group(discord),

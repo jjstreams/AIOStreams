@@ -38,6 +38,8 @@ pub struct Player {
     versions: (Option<String>, Option<String>),
     /// The last value of each logged setting, so re-applying one logs nothing.
     logged: Mutex<HashMap<String, String>>,
+    dolby_vision: Arc<AtomicBool>,
+    emit: Emit,
 }
 
 impl Player {
@@ -65,18 +67,20 @@ impl Player {
             versions.1.as_deref().unwrap_or_default()
         );
         let quit = Arc::new(AtomicBool::new(false));
+        let dolby_vision = Arc::new(AtomicBool::new(true));
         let events = std::thread::Builder::new()
             .name("mpv-events".into())
             .spawn({
                 let (mpv, emit, quit) = (mpv.clone(), emit.clone(), quit.clone());
-                move || pump(&mpv, &emit, &quit)
+                let dolby_vision = dolby_vision.clone();
+                move || pump(&mpv, &emit, &quit, &dolby_vision)
             })
             .map_err(|e| e.to_string())?;
         let (requests, inbox) = mpsc::channel();
         let worker = std::thread::Builder::new()
             .name("mpv-requests".into())
             .spawn({
-                let mpv = mpv.clone();
+                let (mpv, emit) = (mpv.clone(), emit.clone());
                 move || serve(&mpv, &emit, &inbox)
             })
             .map_err(|e| e.to_string())?;
@@ -88,7 +92,29 @@ impl Player {
             worker: Some(worker),
             versions,
             logged: Mutex::default(),
+            dolby_vision,
+            emit,
         })
+    }
+
+    pub fn resolve_youtube(&self, request: String, id: String) {
+        let emit = self.emit.clone();
+        let spawned = std::thread::Builder::new()
+            .name("youtube".into())
+            .spawn(move || {
+                let url = crate::youtube::resolve(&id);
+                emit(Outbound::YoutubeResolved { request, url })
+            });
+        if let Err(e) = spawned {
+            log::warn!("youtube: {e}");
+        }
+    }
+
+    /// Takes effect from the next file.
+    pub fn set_dolby_vision(&self, on: bool) {
+        if self.dolby_vision.swap(on, Ordering::SeqCst) != on {
+            log::info!("set dolby-vision={on}");
+        }
     }
 
     fn send(&self, request: Request) {
@@ -331,7 +357,25 @@ impl MpvLog {
     }
 }
 
-fn pump(mpv: &Mpv, emit: &Emit, quit: &AtomicBool) {
+/// Labelled, so a user's own `vf` stays as it is.
+const DOLBY_VISION_FILTER: &str = "@aiostreams-dovi";
+
+/// Without Dolby Vision, the HDR10 picture under it plays; profile 5 has none, so it keeps it.
+fn strip_dolby_vision(mpv: &Mpv) -> bool {
+    if text(mpv, "current-tracks/video/dolby-vision-profile").is_none_or(|p| p == "5") {
+        return false;
+    }
+    let filter = format!("{DOLBY_VISION_FILTER}:format=dolbyvision=no");
+    match mpv.command(&["vf", "add", &filter]) {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("mpv vf add {filter}: {e}");
+            false
+        }
+    }
+}
+
+fn pump(mpv: &Mpv, emit: &Emit, quit: &AtomicBool, dolby_vision: &AtomicBool) {
     let json = |id: u64| {
         OBSERVED
             .get(id as usize)
@@ -343,6 +387,7 @@ fn pump(mpv: &Mpv, emit: &Emit, quit: &AtomicBool) {
     let mut reported = false;
     // mpv's error names only the step that failed; its http reader's first error says why.
     let mut cause: Option<String> = None;
+    let mut stripping = false;
 
     while !quit.load(Ordering::SeqCst) {
         if let Some(event) = mpv.wait_event(throttle.wait().as_secs_f64(), json) {
@@ -369,10 +414,16 @@ fn pump(mpv: &Mpv, emit: &Emit, quit: &AtomicBool) {
                         external: false,
                     })
                 }
-                Event::FileLoaded => emit(Outbound::MpvEvent {
-                    name: "file-loaded",
-                    external: false,
-                }),
+                Event::FileLoaded => {
+                    if stripping {
+                        let _ = mpv.command(&["vf", "remove", DOLBY_VISION_FILTER]);
+                    }
+                    stripping = !dolby_vision.load(Ordering::SeqCst) && strip_dolby_vision(mpv);
+                    emit(Outbound::MpvEvent {
+                        name: "file-loaded",
+                        external: false,
+                    })
+                }
                 Event::Seek => emit(Outbound::MpvEvent {
                     name: "seek",
                     external: false,

@@ -82,6 +82,7 @@ import {
   subtitleLine,
   SUBTITLE_SIZE_LABELS,
 } from '../lib/subtitles/style';
+import { subtitleTypes, type SubtitleType } from '../lib/subtitles/tracks';
 import {
   audioLanguages,
   ORIGINAL_LANGUAGE,
@@ -122,6 +123,7 @@ import {
   SUBTITLE_SIZES,
   type AudioChannels,
   type PlayerEngine,
+  type Passthrough,
   type EpisodeLayout,
   type BarBackground,
   type RailNames,
@@ -174,6 +176,7 @@ function LanguageList({
   options,
   value,
   max,
+  fixed,
   onChange,
 }: {
   label: string;
@@ -182,6 +185,8 @@ function LanguageList({
   value: string[];
   /** One for a server that keeps only Jellyfin's single language. */
   max?: number;
+  /** Every option always listed, only reordered. */
+  fixed?: boolean;
   onChange: (next: string[]) => void;
 }) {
   const list = React.useRef<HTMLOListElement>(null);
@@ -257,14 +262,15 @@ function LanguageList({
                 () => move(i, i + 1),
                 i === value.length - 1
               )}
-              {button('remove', `Remove ${nameOf(code)}`, <LuX />, () =>
-                remove(i)
-              )}
+              {!fixed &&
+                button('remove', `Remove ${nameOf(code)}`, <LuX />, () =>
+                  remove(i)
+                )}
             </li>
           ))}
         </ol>
       )}
-      {(max === undefined || value.length < max) && (
+      {!fixed && (max === undefined || value.length < max) && (
         <Select
           ref={add}
           // Required leaves the placeholder out of the list it opens.
@@ -301,6 +307,13 @@ const SUBTITLE_MODES: { value: SubtitleMode; label: string; help: string }[] = [
     help: 'Only subtitles for foreign-language parts.',
   },
   { value: 'None', label: 'Off', help: 'Starts without subtitles.' },
+];
+
+const SUBTITLE_TYPE_OPTIONS: { value: SubtitleType; label: string }[] = [
+  { value: 'normal', label: 'Full' },
+  { value: 'sdh', label: 'SDH, with sounds described' },
+  { value: 'forced', label: 'Forced, for foreign parts only' },
+  { value: 'signs', label: 'Signs and songs' },
 ];
 
 const ON_DEVICE = 'Kept on this device.';
@@ -372,6 +385,9 @@ function PlaybackSection() {
   );
   const [chapterSkips, setChapterSkips] = useSetting(
     settings.desktop.chapterSkips
+  );
+  const [dolbyVision, setDolbyVision] = useSetting(
+    settings.desktop.dolbyVision
   );
   const bingeGroups = useFeature('versions');
   const shell = !!shellHost();
@@ -548,7 +564,7 @@ function PlaybackSection() {
           onValueChange={(v) => setHoldRate(Number(v))}
         />
       </SettingsCard>
-      {(decoding || androidTv) && (
+      {shell && (
         <SettingsCard title="Video" description={ON_DEVICE}>
           {decoding && (
             <Switch
@@ -559,6 +575,13 @@ function PlaybackSection() {
               onValueChange={setHardwareDecoding}
             />
           )}
+          <Switch
+            side="right"
+            label="Dolby Vision"
+            help="Plays Dolby Vision where the screen shows it. Turn it off to play the HDR10 picture most of these videos also carry, if Dolby Vision looks dim or flickers. Videos with no HDR10 picture still play in Dolby Vision."
+            value={dolbyVision}
+            onValueChange={setDolbyVision}
+          />
           {androidTv && (
             <Switch
               side="right"
@@ -583,6 +606,19 @@ function PlaybackSection() {
     </>
   );
 }
+
+const PASSTHROUGH_OPTIONS: { value: Passthrough; label: string }[] = [
+  { value: 'auto', label: 'When the TV or receiver decodes it' },
+  { value: 'always', label: 'Always' },
+  { value: 'off', label: 'Off' },
+];
+
+const PASSTHROUGH_HELP: Record<Passthrough, string> = {
+  auto: 'Sends Dolby and DTS audio as it is when your TV or receiver says it decodes them, which keeps Atmos. Otherwise this app decodes it.',
+  always:
+    'Sends Dolby and DTS audio as it is even when your TV or receiver does not say it decodes them, as some do without saying so.',
+  off: 'This app decodes Dolby and DTS audio itself, which loses Atmos.',
+};
 
 const ENGINE_OPTIONS: { value: PlayerEngine; label: string }[] = [
   { value: 'auto', label: 'Automatic' },
@@ -702,6 +738,9 @@ function AudioSection() {
   const [passthrough, setPassthrough] = useSetting(
     settings.desktop.passthrough
   );
+  const [androidPassthrough, setAndroidPassthrough] = useSetting(
+    settings.android.passthrough
+  );
   return (
     <>
       <SettingsCard title="Language" description={ON_ACCOUNT}>
@@ -749,13 +788,23 @@ function AudioSection() {
               onValueChange={(v) => setAudioChannels(v as AudioChannels)}
             />
           )}
-          <Switch
-            side="right"
-            label="Pass surround audio through"
-            help="Sends Dolby and DTS audio to your receiver as it is. Only turn this on if your receiver decodes them."
-            value={passthrough}
-            onValueChange={setPassthrough}
-          />
+          {currentHost().name === 'android-app' ? (
+            <Select
+              label="Pass surround audio through"
+              help={PASSTHROUGH_HELP[androidPassthrough]}
+              options={PASSTHROUGH_OPTIONS}
+              value={androidPassthrough}
+              onValueChange={(v) => setAndroidPassthrough(v as Passthrough)}
+            />
+          ) : (
+            <Switch
+              side="right"
+              label="Pass surround audio through"
+              help="Sends Dolby and DTS audio to your receiver as it is. Only turn this on if your receiver decodes them."
+              value={passthrough}
+              onValueChange={setPassthrough}
+            />
+          )}
         </SettingsCard>
       )}
     </>
@@ -808,6 +857,16 @@ function SubtitlesSection() {
           value={mode}
           onValueChange={(v) => update({ SubtitleMode: v as SubtitleMode })}
         />
+        {Array.isArray(prefs.SubtitleTypes) && (
+          <LanguageList
+            label="Subtitle types"
+            help="When a version has more than one subtitle in your language, the first of these it has shows. Commentary comes last."
+            options={SUBTITLE_TYPE_OPTIONS}
+            value={subtitleTypes(prefs)}
+            fixed
+            onChange={(next) => update({ SubtitleTypes: next })}
+          />
+        )}
         <Switch
           side="right"
           label="Remember picks per show"

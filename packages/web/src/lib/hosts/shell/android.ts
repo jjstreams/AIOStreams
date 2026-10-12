@@ -4,6 +4,7 @@ import { onSettingsChange, settings, type PlayerEngine } from '../../settings';
 import { appBridge } from './bridge';
 import { shellDownloads } from './downloads';
 import { setEngine, useShellPlayer } from './player';
+import { resolveYouTube } from './youtube';
 
 let fullscreen = false;
 
@@ -23,6 +24,7 @@ export function setupAndroid(): () => void {
     const next = {
       frameRate: settings.android.frameRate.read(),
       tunneling: settings.android.tunneling.read(),
+      dolbyVision: settings.desktop.dolbyVision.read(),
     };
     if (JSON.stringify(next) === options) return;
     options = JSON.stringify(next);
@@ -112,6 +114,7 @@ export const saveMpvConfig = (text: string) =>
 
 export const androidHost: Host = {
   name: 'android-app',
+  resolveYouTube,
   get tv() {
     return appBridge()?.tv === true;
   },
@@ -128,6 +131,8 @@ export const androidHost: Host = {
   },
   saveFile: (name, type, text) =>
     appBridge()?.send({ type: 'save-file', name, mime: type, text }),
+  keyboardCompletions: (names) =>
+    appBridge()?.send({ type: 'keyboard-completions', items: names }),
   fullscreen: {
     active: () => fullscreen,
     set: (on) => appBridge()?.send({ type: 'fullscreen', value: on }),

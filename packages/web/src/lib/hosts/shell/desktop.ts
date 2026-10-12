@@ -1,8 +1,10 @@
 import React from 'react';
 import type { Host } from '..';
+import { onSettingsChange, settings } from '../../settings';
 import { appBridge, type ShellMessage } from './bridge';
 import { shellDownloads } from './downloads';
 import { useShellPlayer } from './player';
+import { resolveYouTube } from './youtube';
 
 export type DiscordStatus = Extract<ShellMessage, { type: 'discord-status' }>;
 
@@ -39,12 +41,21 @@ let windowFullscreen = false;
 
 /** Follows the window's full screen and Discord, and keeps the browser's menu off the page. */
 export function setupDesktop(): () => void {
+  let dolbyVision: boolean | null = null;
+  const sendOptions = () => {
+    if (settings.desktop.dolbyVision.read() === dolbyVision) return;
+    dolbyVision = settings.desktop.dolbyVision.read();
+    appBridge()?.send({ type: 'player-options', dolbyVision });
+  };
+  sendOptions();
+  const unsubscribeSettings = onSettingsChange(sendOptions);
   const unsubscribe = appBridge()?.subscribe((m) => {
     if (m.type === 'fullscreen') windowFullscreen = m.value;
     else if (m.type === 'discord-status') onDiscordStatus(m);
   });
   window.addEventListener('contextmenu', onContextMenu);
   return () => {
+    unsubscribeSettings();
     unsubscribe?.();
     window.removeEventListener('contextmenu', onContextMenu);
   };
@@ -59,6 +70,7 @@ export const desktopHost: Host = {
   device: () => ({ name: appBridge()?.device }),
   usePlayer: useShellPlayer,
   playerFeatures: ['audio', 'chapters', 'stats'],
+  resolveYouTube,
   downloads: {
     ...shellDownloads,
     folder: {
