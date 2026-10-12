@@ -58,3 +58,27 @@ to `Viren070/AIOStreams`. Pin the repository explicitly:
 ```sh
 gh pr create --repo jjstreams/AIOStreams --base main --head <branch>
 ```
+
+## Fork maintenance
+
+This fork exists to keep JJstreams logging additions on top of upstream. It does
+not publish upstream's Docker images, client applications, documentation or
+releases. Keep only `build.yml` and `fork-maintenance.yml` enabled in GitHub
+Actions. The maintenance workflow also disables inherited publication workflows.
+
+`fork-maintenance.yml` checks upstream `main` every hour. It makes a normal merge
+in an isolated checkout, runs the admission logging tests and the addon build,
+and publishes the validated merge with a normal, non-forced push. A conflict,
+failed check or concurrent update stops the run and leaves remote `main` alone.
+Direct pushes to `main` also run the logging tests and build. No deployment is
+performed; the setup repository continues to own reviewed source pins.
+
+The publish job uses `JJSTREAMS_UPSTREAM_SYNC_TOKEN`, the shared account's
+credential, and verifies that it authenticates as `jjstreams`. This secret is
+available only in the publish step, on a separate runner from upstream code
+execution. Never print it or add it to Git history. Scheduled failure email
+notifications belong to the account that created or last changed the schedule;
+keep Actions email notifications enabled for failed runs on `jjstreams`.
+
+Use this workflow for upstream updates rather than an additional external job
+that pushes merges without these checks.
