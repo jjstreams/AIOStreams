@@ -10,6 +10,7 @@ import {
 import { clock, fullTitle } from '../../format';
 import { base64, checkSubtitleFile } from '../../subtitles/files';
 import { sameLanguage } from '../../languages';
+import { audioTypes, betterAudioFor } from '../../playback/audio-tracks';
 import { parseChapters, type Chapter } from '../../playback/chapters';
 import { settings, useSetting, type SubtitleStyle } from '../../settings';
 import {
@@ -47,6 +48,7 @@ import { usePlayheadWriter } from '../../playback/playhead';
 import { useLatest } from '../../use-latest';
 import { currentHost } from '..';
 import { appBridge } from './bridge';
+import { passthroughValue } from './sound';
 
 interface MpvTrack {
   id: number;
@@ -59,6 +61,8 @@ interface MpvTrack {
   codec?: string;
   forced?: boolean;
   'hearing-impaired'?: boolean;
+  'visual-impaired'?: boolean;
+  default?: boolean;
 }
 
 const mpvFacts = (track: MpvTrack): SubtitleFacts => ({
@@ -365,6 +369,23 @@ export function useShellPlayer(opts: NativePlayerOptions): PlayerController {
       imageSubtitle.current = image;
       set('sub-scale', image ? 1 : subtitleScale(style));
     };
+    const rankAudio = () => {
+      const audio = fileTracks
+        .filter((t) => t.type === 'audio')
+        .map((t) => ({ ...t, visualImpaired: t['visual-impaired'] }));
+      const chosen = audio.find((t) => t.selected);
+      const { prefs = {}, source } = latest.current;
+      const better =
+        chosen &&
+        betterAudioFor(
+          audio,
+          chosen,
+          audioTypes(prefs),
+          audioCodes(prefs, source),
+          prefs.PlayDefaultAudioTrack !== false
+        );
+      if (better) set('aid', better.id);
+    };
     // An external subtitle when the mode wants one and the file has none of its
     // own in that language or an earlier one; Default only honours the file's.
     // The player picks the language by the user's settings; the type is ranked here.
@@ -510,6 +531,7 @@ export function useShellPlayer(opts: NativePlayerOptions): PlayerController {
       } else if (m.type === 'mpv-event' && m.name === 'playback-restart')
         patch({ started: true, waiting: false });
       else if (m.type === 'mpv-event' && m.name === 'file-loaded') {
+        rankAudio();
         rankSubtitle();
         addPreferredSubtitle();
       } else if (m.type === 'mpv-ended' && m.reason === 'eof') {
@@ -642,6 +664,7 @@ export function useShellPlayer(opts: NativePlayerOptions): PlayerController {
         }
       : { pages: STATS_PAGES, page: statsPage, show: showStats },
     external: launched?.name,
+    sound: !external,
     close: external
       ? () => {
           clearTimeout(linger);
@@ -739,13 +762,7 @@ function failure(error: string | null, cause?: string): string {
  */
 function trackOptions(prefs: PlaybackPrefs, source: SourceInfo): string[] {
   const options: string[] = [];
-  const original = source.MediaStreams?.find(
-    (s) => s.Type === 'Audio' && s.Index === source.DefaultAudioStreamIndex
-  )?.Language;
-  const alang = audioLanguages(prefs)
-    .map((l) => (l === ORIGINAL_LANGUAGE ? original : l))
-    .filter((l): l is string => !!l);
-  options.push(...listOption('alang', alang));
+  options.push(...listOption('alang', audioCodes(prefs, source)));
   const slang = listOption('slang', subtitleLanguages(prefs));
   switch (prefs.SubtitleMode) {
     case 'None':
@@ -768,6 +785,15 @@ function trackOptions(prefs: PlaybackPrefs, source: SourceInfo): string[] {
       options.push(...slang);
   }
   return options;
+}
+
+function audioCodes(prefs: PlaybackPrefs, source: SourceInfo): string[] {
+  const original = source.MediaStreams?.find(
+    (s) => s.Type === 'Audio' && s.Index === source.DefaultAudioStreamIndex
+  )?.Language;
+  return audioLanguages(prefs)
+    .map((l) => (l === ORIGINAL_LANGUAGE ? original : l))
+    .filter((l): l is string => !!l);
 }
 
 /** Commas separate the options themselves, so each further entry is appended. */
@@ -801,26 +827,20 @@ function applySubtitleStyle(
   setProp('sub-ass-override', style.overrideStyled ? 'force' : 'scale');
 }
 
-export function applyDesktopSettings(): void {
-  const { hardwareDecoding, audioChannels, passthrough } = settings.desktop;
+export function applyPlayerSettings(): void {
+  const { hardwareDecoding, audioChannels, audioDevice } = settings.desktop;
+  const android = appBridge()?.platform === 'android';
   const channels = audioChannels.read();
   // On Android, auto-safe only tries copying every frame back from MediaCodec.
   // TVs copy them: some draw direct frames wrong, and they have no battery to save.
-  const hwdec =
-    appBridge()?.platform !== 'android'
-      ? 'auto-safe'
-      : currentHost().tv
-        ? 'mediacodec-copy'
-        : 'mediacodec,mediacodec-copy';
+  const hwdec = !android
+    ? 'auto-safe'
+    : currentHost().tv
+      ? 'mediacodec-copy'
+      : 'mediacodec,mediacodec-copy';
   setProp('hwdec', hardwareDecoding.read() ? hwdec : 'no');
   setProp('audio-channels', channels === 'auto' ? 'auto-safe' : channels);
-  const always = 'ac3,eac3,dts-hd,truehd';
-  // The Android app turns `auto` into what the audio output decodes.
-  const spdif =
-    appBridge()?.platform === 'android'
-      ? { off: '', auto: 'auto', always }[settings.android.passthrough.read()]
-      : passthrough.read()
-        ? always
-        : '';
-  setProp('audio-spdif', spdif);
+  setProp('audio-spdif', passthroughValue());
+  setProp('audio-delay', settings.sound.delayMs.read() / 1000);
+  if (!android) setProp('audio-device', audioDevice.read());
 }
