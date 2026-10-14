@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Rect
 import android.media.MediaFormat
 import android.net.Uri
+import android.os.Debug
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -34,10 +35,13 @@ import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.UnrecognizedInputFormatException
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -126,6 +130,10 @@ class ExoEngine(private val context: Context) :
     @Volatile
     private var dolbyVision: Pair<String, DolbyVisionRoute>? = null
 
+    /** What the sound goes out as, after passthrough, mixing or re-encoding. */
+    @Volatile
+    private var audioTrack: AudioSink.AudioTrackConfig? = null
+
     private var tunneling = false
 
     @Volatile
@@ -157,9 +165,26 @@ class ExoEngine(private val context: Context) :
                 output = OutputSink(ac3)
                 return output
             }
+
+            // After the device's own decoders, for what they can't play, such as DTS and TrueHD.
+            override fun buildAudioRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                audioSink: AudioSink,
+                eventHandler: Handler,
+                eventListener: AudioRendererEventListener,
+                out: ArrayList<Renderer>,
+            ) {
+                super.buildAudioRenderers(
+                    context, extensionRendererMode, mediaCodecSelector, enableDecoderFallback,
+                    audioSink, eventHandler, eventListener, out,
+                )
+                out += FfmpegAudioRenderer(eventHandler, eventListener, audioSink)
+            }
         }
             .setEnableDecoderFallback(true)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         val audio = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build()
         player = ExoPlayer.Builder(context, renderers, sources)
             // The app keeps audio focus and pauses for noise itself.
@@ -229,6 +254,13 @@ class ExoEngine(private val context: Context) :
                 put("sampleRate", audio.sampleRate)
                 put("audioBitrate", audio.bitrate)
             }
+            audioTrack?.let { track ->
+                put("outputMime", mimeOf(track.encoding))
+                put("outputChannels", Integer.bitCount(track.channelConfig))
+            }
+            val runtime = Runtime.getRuntime()
+            put("javaHeap", runtime.totalMemory() - runtime.freeMemory())
+            put("nativeHeap", Debug.getNativeHeapAllocatedSize())
             put("hdrTypes", JsonArray(caps.hdrTypes.sorted().map { JsonPrimitive(it) }))
             put("dolbyVisionProfiles", JsonArray(caps.dolbyVisionProfiles.sorted().map { JsonPrimitive(it) }))
             dolbyVision?.let { (codecs, route) ->
@@ -336,6 +368,7 @@ class ExoEngine(private val context: Context) :
         options = TrackOptions(pairs)
         caps = MediaCaps.read(context)
         dolbyVision = null
+        audioTrack = null
         loaded = false
         chosen = false
         restarting = true
@@ -712,6 +745,13 @@ class ExoEngine(private val context: Context) :
         decoders["audio"] = decoderName
     }
 
+    override fun onAudioTrackInitialized(
+        eventTime: AnalyticsListener.EventTime,
+        audioTrackConfig: AudioSink.AudioTrackConfig,
+    ) {
+        audioTrack = audioTrackConfig
+    }
+
     private val poll = object : Runnable {
         override fun run() {
             reportPosition()
@@ -763,6 +803,19 @@ class ExoEngine(private val context: Context) :
 
         /** mpv's names for the layouts the page offers. */
         val CHANNELS = mapOf("stereo" to 2, "5.1" to 6, "7.1" to 8)
+
+        /** The sound type an audio track carries, PCM for any decoded sound. */
+        fun mimeOf(encoding: Int) = when (encoding) {
+            C.ENCODING_AC3 -> MimeTypes.AUDIO_AC3
+            C.ENCODING_E_AC3 -> MimeTypes.AUDIO_E_AC3
+            C.ENCODING_E_AC3_JOC -> MimeTypes.AUDIO_E_AC3_JOC
+            C.ENCODING_AC4 -> MimeTypes.AUDIO_AC4
+            C.ENCODING_DTS -> MimeTypes.AUDIO_DTS
+            C.ENCODING_DTS_HD -> MimeTypes.AUDIO_DTS_HD
+            C.ENCODING_DTS_UHD_P2 -> MimeTypes.AUDIO_DTS_X
+            C.ENCODING_DOLBY_TRUEHD -> MimeTypes.AUDIO_TRUEHD
+            else -> MimeTypes.AUDIO_RAW
+        }
 
         /** Errors loading the link. */
         val LINK = 2000..2999
