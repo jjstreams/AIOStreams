@@ -1,84 +1,31 @@
-import React from 'react';
 import { formatBytes } from '@aiostreams/ui/core/format';
-import { storage } from '../../storage';
-import {
-  bestOfTypes,
-  forcedOnly,
-  subtitleUrl,
-  textSubtitles,
-  type SubtitleFacts,
-} from '../../subtitles/tracks';
-import { clock, fullTitle } from '../../format';
+import { fullTitle } from '../../format';
 import { base64, checkSubtitleFile } from '../../subtitles/files';
-import { sameLanguage } from '../../languages';
-import { audioTypes, betterAudioFor } from '../../playback/audio-tracks';
-import { parseChapters, type Chapter } from '../../playback/chapters';
-import { settings, useSetting, type SubtitleStyle } from '../../settings';
-import {
-  audioLanguages,
-  ORIGINAL_LANGUAGE,
-  subtitleLanguages,
-  type PlaybackPrefs,
-} from '../../user-config';
-import type { SourceInfo } from '../../types';
-import {
-  clampDelay,
-  savedSubtitleDelay,
-  saveSubtitleDelay,
-} from '../../subtitles/delay';
-import { parseSubtitleLines } from '../../subtitles/cues';
+import { settings, type SubtitleStyle } from '../../settings';
+import { subtitleLanguages } from '../../user-config';
 import {
   MPV_OUTLINE,
+  MPV_SHADOW,
   mpvColor,
   subtitleHeight,
   subtitleScale,
 } from '../../subtitles/style';
+import { parseChapters } from '../../playback/chapters';
 import {
-  initialState,
   ownTrackLabel,
-  storedVolume,
-  trackLabel,
-  VOLUME_KEY,
-  type NativePlayerOptions,
-  type PlayerController,
-  type PlayerState,
   type QueuedEpisode,
   type Track,
 } from '../../playback/controller';
-import { usePlayheadWriter } from '../../playback/playhead';
-import { useLatest } from '../../use-latest';
+import type {
+  EngineFactory,
+  EngineFile,
+  EngineState,
+  EngineTrack,
+} from '../../playback/engine';
+import { audioCodes } from '../../playback/track-picks';
 import { currentHost } from '..';
-import { appBridge } from './bridge';
-import { passthroughValue } from './sound';
-
-interface MpvTrack {
-  id: number;
-  type: 'video' | 'audio' | 'sub';
-  title?: string;
-  lang?: string;
-  external?: boolean;
-  'external-filename'?: string;
-  selected?: boolean;
-  codec?: string;
-  forced?: boolean;
-  'hearing-impaired'?: boolean;
-  'visual-impaired'?: boolean;
-  default?: boolean;
-}
-
-const mpvFacts = (track: MpvTrack): SubtitleFacts => ({
-  title: track.title,
-  forced: track.forced,
-  hearingImpaired: track['hearing-impaired'],
-});
-
-const IMAGE_SUBTITLE_CODECS = new Set([
-  'hdmv_pgs_subtitle',
-  'dvd_subtitle',
-  'dvb_subtitle',
-]);
-
-const EXTERNAL = 'ext:';
+import { appBridge, type AppTrack, type ShellMessage } from './bridge';
+import { passthroughFormats } from './sound';
 
 const STATS_PAGES: Track[] = [
   { id: '1', label: 'Playback' },
@@ -222,91 +169,85 @@ function exoStatsText(
 
 /** How long a player in its own window waits for the next episode's page. */
 const LINGER_MS = 10_000;
-/** An end of file this far before the duration is a stream that gave out, not the end. */
-const EARLY_END_MS = 30_000;
 let linger: ReturnType<typeof setTimeout> | undefined;
 /** The episode a launched player moved on to by itself, which the next page takes over. */
 let advanced: { itemId: string; sourceId: string } | null = null;
 
 const SUBTITLE_TYPES = ['srt', 'vtt', 'ass', 'ssa', 'sub', 'sup'];
 
+const SUBTITLE_MODES = {
+  Default: 'default',
+  Always: 'always',
+  Smart: 'smart',
+  OnlyForced: 'forced',
+  None: 'none',
+} as const;
+
+type PlayedFile = Pick<QueuedEpisode, 'url' | 'source' | 'startMs' | 'headers'>;
+
+/** From the app's player itself, rather than the window or the app. */
+const fromPlayer = (m: ShellMessage) =>
+  m.type === 'player-state' ||
+  m.type === 'player-tracks' ||
+  m.type === 'player-chapters' ||
+  m.type === 'player-event' ||
+  m.type === 'player-ended';
+
 /**
- * The AIOStreams desktop app's mpv, drawn beneath the page, or with
- * `launched`, the user's own player in its own window. Its tracks are the
- * file's own, plus the server's external subtitles, which mpv downloads only
- * when picked: a version can carry dozens.
+ * The AIOStreams apps' player, drawn beneath the page, or with `launched`,
+ * the user's own player in its own window. The server's subtitles are
+ * downloaded only once picked: a version can carry dozens.
  */
-export function useShellPlayer(opts: NativePlayerOptions): PlayerController {
-  const { item, source, startMs, url, launched } = opts;
+export const appEngine: EngineFactory = (emit, { launched }) => {
   const external = !!launched;
-  // The app can be full screen already, from before this player mounted.
-  const [state, setState] = React.useState(() => ({
-    ...initialState(source),
-    fullscreen: !external && !!currentHost().fullscreen?.active(),
-  }));
-  const playhead = usePlayheadWriter(startMs);
-  const [tracks, setTracks] = React.useState<MpvTrack[]>([]);
-  const [chapters, setChapters] = React.useState<Chapter[]>([]);
-  // Offered once per file.
-  const [retryable, setRetryable] = React.useState(false);
-  const retried = React.useRef(false);
-  const [endedEarlyAt, setEndedEarlyAt] = React.useState<number | null>(null);
-  const latest = useLatest({ ...opts, state });
-  const queued = React.useRef<QueuedEpisode | null>(null);
-  const externals = React.useMemo(
-    () =>
-      textSubtitles(source)
-        .filter((s) => s.IsExternal)
-        .flatMap((s, i) => {
-          const link = opts.subtitleUrl
-            ? opts.subtitleUrl(s)
-            : subtitleUrl(opts.client, s);
-          return link
-            ? [
-                {
-                  id: `${EXTERNAL}${s.Index}`,
-                  url: link,
-                  label: trackLabel(s, i + 1),
-                  lang: s.Language ?? '',
-                },
-              ]
-            : [];
-        }),
-    [source, opts.client, opts.subtitleUrl]
-  );
-  const fromServer = (track: MpvTrack) =>
-    externals.some((e) => e.url === track['external-filename']);
-  const loaded = (url: string) =>
-    tracks.find((t) => t.type === 'sub' && t['external-filename'] === url);
-  // mpv's id for a loaded external subtitle reads back as its external id.
-  const subtitleId = (sid: string | null) => {
-    const track = tracks.find((t) => t.type === 'sub' && String(t.id) === sid);
-    const external = externals.find(
-      (e) => e.url === track?.['external-filename']
-    );
-    return external?.id ?? sid;
-  };
-  const patch = (next: Partial<PlayerState>) =>
-    setState((s) => ({ ...s, ...next }));
   const shell = appBridge()!;
   const target = external ? { external: true } : {};
-  const set = (name: string, value: unknown) =>
-    shell.send({ type: 'mpv-set-prop', name, value, ...target });
-  const command = (...args: unknown[]) =>
-    shell.send({ type: 'mpv-command', args, ...target });
-  const fileOptions = (fromMs: number, source: SourceInfo) =>
-    [
-      ...(fromMs ? [`start=${(fromMs / 1000).toFixed(3)}`] : []),
-      ...trackOptions(latest.current.prefs ?? {}, source),
-    ].join(',');
-  const load = (fromMs: number) =>
-    command('loadfile', url, 'replace', -1, fileOptions(fromMs, source));
+  const send = (type: string, fields: Record<string, unknown> = {}) =>
+    shell.send({ type, ...fields, ...target });
+  const report = (state: EngineState) => emit({ type: 'state', state });
 
-  const [statsPage, setStatsPage] = React.useState<string | null>(null);
-  const exo = playsWithExoPlayer();
-  const [exoStats, setExoStats] = React.useState<string>();
-  React.useEffect(() => {
-    if (!exo || !statsPage) return setExoStats(undefined);
+  let file: EngineFile | null = null;
+  let tracks: AppTrack[] = [];
+  let queued: QueuedEpisode | null = null;
+  let moved = false;
+  // Offered once per file.
+  let retried = false;
+  let statsPage: string | null = null;
+  let fullscreen = false;
+  let unsubscribe = () => {};
+  let stopExoStats = () => {};
+
+  const load = (played: PlayedFile, append: boolean) => {
+    const prefs = file?.prefs ?? {};
+    send('player-load', {
+      url: played.url,
+      headers: played.headers,
+      startMs: played.startMs,
+      append,
+      audioLanguages: audioCodes(prefs, played.source),
+      subtitleLanguages: subtitleLanguages(prefs),
+      subtitleMode: SUBTITLE_MODES[prefs.SubtitleMode ?? 'Default'],
+    });
+  };
+
+  const engineTracks = (): EngineTrack[] =>
+    tracks.map((t) => ({
+      id: t.id,
+      type: t.type,
+      label: ownTrackLabel(t.title, t.language, Number(t.id)),
+      lang: t.language,
+      title: t.title,
+      forced: t.forced,
+      hearingImpaired: t.hearingImpaired,
+      visualImpaired: t.visualImpaired,
+      default: t.default,
+      external: t.external,
+      server: file?.subtitles.find((s) => s.url === t.url)?.id,
+    }));
+
+  const showExoStats = (page: string | null) => {
+    stopExoStats();
+    if (!page) return emit({ type: 'stats-text', text: undefined });
     let last: { cpuMs: number; atMs: number } | undefined;
     const stop = shell.subscribe((m) => {
       if (m.type !== 'player-stats') return;
@@ -315,379 +256,219 @@ export function useShellPlayer(opts: NativePlayerOptions): PlayerController {
           ? ((m.cpuMs - last.cpuMs) / (m.atMs - last.atMs)) * 100
           : undefined;
       last = m;
-      setExoStats(exoStatsText(m.stats, cpu));
+      emit({ type: 'stats-text', text: exoStatsText(m.stats, cpu) });
     });
     const ask = () => shell.send({ type: 'player-stats' });
     ask();
     const timer = setInterval(ask, STATS_MS);
-    return () => {
+    stopExoStats = () => {
       clearInterval(timer);
       stop();
+      stopExoStats = () => {};
     };
-  }, [exo, statsPage, shell]);
-  const shownStats = useLatest(statsPage);
-  const showStats = (page: string | null) => {
-    if (shownStats.current)
-      command('script-binding', 'stats/display-stats-toggle');
-    if (page) command('script-binding', `stats/display-page-${page}-toggle`);
-    setStatsPage(page);
   };
-  React.useEffect(
-    () => () => {
-      if (shownStats.current)
-        command('script-binding', 'stats/display-stats-toggle');
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
 
-  // The user's own player keeps its own look.
-  const [fit] = useSetting(settings.videoFit);
-  React.useEffect(() => {
-    if (external) return;
-    set('keepaspect', fit !== 'stretch');
-    set('panscan', fit === 'crop' ? 1 : 0);
-    set('sub-ass-force-margins', fit === 'crop');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fit]);
+  const showOverlay = (page: string | null) => {
+    statsPage = page;
+    send('player-stats-overlay', { page });
+  };
 
-  const imageSubtitle = React.useRef(false);
-  const [lift, setLift] = React.useState(0);
-  const { subtitleStyle } = opts;
-  React.useEffect(() => {
-    if (!external) applySubtitleStyle(subtitleStyle, imageSubtitle.current);
-  }, [subtitleStyle, external]);
-  React.useEffect(() => {
-    if (!external)
-      setProp('sub-pos', 100 - subtitleHeight(subtitleStyle, lift));
-  }, [subtitleStyle, lift, external]);
-
-  React.useEffect(() => {
-    // mpv refuses anything above its volume-max.
-    const { volume, muted } = storedVolume(Infinity);
-    let cache = false;
-    let seeking = false;
-    let moved = false;
-    // Set while the launched player may already play this version, until it says whether it is idle.
-    let adopting =
-      external &&
-      advanced?.itemId === item.Id &&
-      advanced?.sourceId === source.Id;
-    let preferOnTracks = false;
-    advanced = null;
-    retried.current = false;
-    setRetryable(false);
-    setEndedEarlyAt(null);
-
-    let fileTracks: MpvTrack[] = [];
-    let sid: string | null = null;
-    const syncSubtitleScale = () => {
-      const track = fileTracks.find(
-        (t) => t.type === 'sub' && String(t.id) === sid
-      );
-      const image = IMAGE_SUBTITLE_CODECS.has(track?.codec ?? '');
-      const style = latest.current.subtitleStyle;
-      if (external || image === imageSubtitle.current || !style) return;
-      imageSubtitle.current = image;
-      set('sub-scale', image ? 1 : subtitleScale(style));
-    };
-    const rankAudio = () => {
-      const audio = fileTracks
-        .filter((t) => t.type === 'audio')
-        .map((t) => ({ ...t, visualImpaired: t['visual-impaired'] }));
-      const chosen = audio.find((t) => t.selected);
-      const { prefs = {}, source } = latest.current;
-      const better =
-        chosen &&
-        betterAudioFor(
-          audio,
-          chosen,
-          audioTypes(prefs),
-          audioCodes(prefs, source),
-          prefs.PlayDefaultAudioTrack !== false
-        );
-      if (better) set('aid', better.id);
-    };
-    // An external subtitle when the mode wants one and the file has none of its
-    // own in that language or an earlier one; Default only honours the file's.
-    // The player picks the language by the user's settings; the type is ranked here.
-    const rankSubtitle = () => {
-      const prefs = latest.current.prefs ?? {};
-      const subtitles = fileTracks.filter((t) => t.type === 'sub');
-      const chosen = subtitles.find((t) => t.selected);
-      if (!chosen) return;
-      const playing = fileTracks.find((t) => t.type === 'audio' && t.selected);
-      const onlyForced =
-        prefs.SubtitleMode === 'OnlyForced' ||
-        (prefs.SubtitleMode === 'Smart' &&
-          subtitleLanguages(prefs).some((l) => sameLanguage(l, playing?.lang)));
-      const same = subtitles.filter(
-        (t) => t === chosen || (!!t.lang && t.lang === chosen.lang)
-      );
-      const best = bestOfTypes(
-        onlyForced ? same.filter((t) => forcedOnly(mpvFacts(t))) : same,
-        mpvFacts,
-        prefs
-      );
-      if (best && best !== chosen) set('sid', best.id);
-    };
-    const addPreferredSubtitle = () => {
-      const prefs = latest.current.prefs ?? {};
-      const mode = prefs.SubtitleMode;
-      if (mode !== 'Always' && mode !== 'Smart') return;
-      const languages = subtitleLanguages(prefs);
-      const playing = fileTracks.find((t) => t.type === 'audio' && t.selected);
-      if (
-        mode === 'Smart' &&
-        languages.some((l) => sameLanguage(l, playing?.lang))
-      )
-        return;
-      for (const lang of languages) {
-        const own = fileTracks.some(
-          (t) => t.type === 'sub' && !t.external && sameLanguage(lang, t.lang)
-        );
-        if (own) return;
-        const external = externals.find((e) => sameLanguage(lang, e.lang));
-        if (!external) continue;
-        command(
-          'sub-add',
-          external.url,
-          'select',
-          external.label,
-          external.lang
-        );
-        return;
-      }
-    };
-    const onProp = (name: string, data: unknown) => {
-      const num = typeof data === 'number' ? data : null;
-      switch (name) {
-        case 'time-pos':
-          if (num !== null) playhead.set({ positionMs: num * 1000 });
-          break;
-        case 'duration':
-          if (num !== null) patch({ durationMs: num * 1000 });
-          break;
-        case 'demuxer-cache-time':
-          if (num !== null) playhead.set({ bufferedMs: num * 1000 });
-          break;
-        case 'pause':
-          patch({ paused: data === true });
-          break;
-        case 'paused-for-cache':
-        case 'seeking':
-          if (name === 'seeking') seeking = data === true;
-          else cache = data === true;
-          patch({ waiting: cache || seeking });
-          break;
-        case 'idle-active':
-          if (!adopting) break;
-          adopting = false;
-          if (data === true) load(startMs);
-          else {
-            patch({ started: true, waiting: false });
-            command('playlist-clear');
-            preferOnTracks = true;
-          }
-          break;
-        case 'volume':
-          if (num !== null) patch({ volume: num / 100 });
-          break;
-        case 'volume-max':
-          if (num !== null) patch({ maxVolume: num / 100 });
-          break;
-        case 'mute':
-          patch({ muted: data === true });
-          break;
-        case 'speed':
-          if (num !== null) patch({ rate: num });
-          break;
-        case 'fullscreen':
-          if (external) patch({ fullscreen: data === true });
-          break;
-        case 'aid':
-        case 'sid': {
-          const id =
-            typeof data === 'string' && /^\d+$/.test(data) ? data : null;
-          patch(name === 'aid' ? { audio: id } : { subtitle: id });
-          if (name === 'sid') {
-            sid = id;
-            syncSubtitleScale();
-          }
-          break;
-        }
-        case 'track-list':
-          fileTracks = Array.isArray(data) ? (data as MpvTrack[]) : [];
-          setTracks(fileTracks);
-          syncSubtitleScale();
-          if (preferOnTracks) {
-            preferOnTracks = false;
-            addPreferredSubtitle();
-          }
-          break;
-        case 'chapter-list':
-          setChapters(parseChapters(data));
-          break;
-      }
-    };
-
-    const unsubscribe = shell.subscribe((m) => {
-      const fromMpv =
-        m.type === 'mpv-prop' ||
-        m.type === 'mpv-event' ||
-        m.type === 'mpv-ended';
-      const toLaunched = 'external' in m && m.external === true;
-      if (fromMpv && (moved || toLaunched !== external)) return;
-      if (m.type === 'mpv-prop') onProp(m.name, m.data);
-      else if (m.type === 'fullscreen' && !external)
-        patch({ fullscreen: m.value });
-      else if (m.type === 'pip') patch({ pictureInPicture: m.value });
-      else if (m.type === 'error') console.warn(m.message);
-      // The next file it starts is the queued episode.
-      else if (m.type === 'mpv-event' && m.name === 'start-file') {
-        const next = queued.current;
-        if (!next) return;
-        moved = true;
-        advanced = { itemId: next.itemId, sourceId: next.source.Id! };
-        latest.current.onAdvance?.(next);
-      } else if (m.type === 'mpv-event' && m.name === 'playback-restart')
-        patch({ started: true, waiting: false });
-      else if (m.type === 'mpv-event' && m.name === 'file-loaded') {
-        rankAudio();
-        rankSubtitle();
-        addPreferredSubtitle();
-      } else if (m.type === 'mpv-ended' && m.reason === 'eof') {
-        if (queued.current) return;
-        const at = playhead.positionMs;
-        if (latest.current.state.durationMs - at > EARLY_END_MS) {
-          setEndedEarlyAt(at);
-          patch({ error: 'the stream ended early' });
-        } else latest.current.onEnded();
-      } else if (m.type === 'mpv-ended' && m.reason === 'error') {
-        setRetryable(!retried.current && !LINK_FAILURES.has(m.error ?? ''));
-        patch({ error: failure(m.error, m.cause) });
-      } else if (m.type === 'external-ended' && external) {
-        if (m.error) patch({ error: m.error });
-        else latest.current.onClosed?.();
-      }
-    });
-    if (launched) {
-      clearTimeout(linger);
-      shell.send({
-        type: 'external-open',
-        player: launched.id,
-        title: fullTitle(item),
-      });
-    }
-    shell.send({ type: 'mpv-sync', ...target });
-    // mpv keeps pause from the last file.
-    set('pause', false);
-    if (!external) {
-      set('volume', Math.round(volume * 100));
-      set('mute', muted);
-    }
-    const delay = savedSubtitleDelay(source.Id);
-    set('sub-delay', delay / 1000);
-    patch({ subtitleDelayMs: delay });
-    if (!adopting) load(startMs);
-    return () => {
+  return {
+    load(next) {
       unsubscribe();
-      if (!external) return command('stop');
-      if (!moved) set('pause', true);
+      file = next;
+      tracks = [];
+      moved = false;
+      retried = false;
+      let buffering = false;
+      let seeking = false;
+      // Set while the launched player may already play this version, until it says whether it is idle.
+      let adopting =
+        external &&
+        advanced?.itemId === next.item.Id &&
+        advanced?.sourceId === next.source.Id;
+      let adopted = false;
+      advanced = null;
+
+      unsubscribe = shell.subscribe((m) => {
+        const toLaunched = 'external' in m && m.external === true;
+        if (fromPlayer(m) && (moved || toLaunched !== external)) return;
+        switch (m.type) {
+          case 'player-state': {
+            const { positionMs, bufferedMs, idle } = m;
+            if (positionMs !== undefined || bufferedMs !== undefined)
+              emit({ type: 'position', positionMs, bufferedMs });
+            if (m.buffering !== undefined) buffering = m.buffering;
+            if (m.fullscreen !== undefined) fullscreen = m.fullscreen;
+            if (m.seeking !== undefined) seeking = m.seeking;
+            report({
+              ...(m.durationMs !== undefined && { durationMs: m.durationMs }),
+              ...(m.paused !== undefined && { paused: m.paused }),
+              ...((m.buffering !== undefined || m.seeking !== undefined) && {
+                waiting: buffering || seeking,
+              }),
+              ...(m.volume !== undefined && { volume: m.volume }),
+              ...(m.maxVolume !== undefined && { maxVolume: m.maxVolume }),
+              ...(m.muted !== undefined && { muted: m.muted }),
+              ...(m.speed !== undefined && { rate: m.speed }),
+              ...(m.audio !== undefined && { audio: m.audio }),
+              ...(m.subtitle !== undefined && { subtitle: m.subtitle }),
+              ...(m.fullscreen !== undefined && { fullscreen: m.fullscreen }),
+            });
+            if (idle === undefined || !adopting) return;
+            adopting = false;
+            if (idle) load(next, false);
+            else {
+              report({ started: true, waiting: false });
+              adopted = true;
+            }
+            return;
+          }
+          case 'player-tracks':
+            tracks = m.tracks;
+            emit({ type: 'tracks', tracks: engineTracks() });
+            if (adopted) {
+              adopted = false;
+              emit({ type: 'loaded' });
+            }
+            return;
+          case 'player-chapters':
+            return emit({
+              type: 'chapters',
+              chapters: parseChapters(m.chapters),
+            });
+          case 'player-event':
+            // The next file it starts is the queued episode.
+            if (m.name === 'start' && queued) {
+              moved = true;
+              advanced = { itemId: queued.itemId, sourceId: queued.source.Id! };
+              emit({ type: 'advanced', episode: queued });
+            } else if (m.name === 'restart')
+              report({ started: true, waiting: false });
+            else if (m.name === 'loaded') emit({ type: 'loaded' });
+            return;
+          case 'player-ended': {
+            if (m.reason === 'eof' && !queued) emit({ type: 'ended' });
+            if (m.reason !== 'error') return;
+            const other = playsWithExoPlayer() ? 'mpv' : 'exoplayer';
+            const offer =
+              !retried &&
+              !external &&
+              !LINK_FAILURES.has(m.error ?? '') &&
+              appBridge()?.platform === 'android' &&
+              // Automatic has tried both engines before a failure reaches the page.
+              settings.player.engine.read() !== 'auto';
+            return emit({
+              type: 'failed',
+              error: failure(m.error, m.status, m.cause),
+              retry: offer
+                ? {
+                    label:
+                      other === 'mpv' ? 'Play with mpv' : 'Play with ExoPlayer',
+                    run: () => {
+                      retried = true;
+                      shell.send({ type: 'player-retry', name: other });
+                    },
+                  }
+                : undefined,
+            });
+          }
+          case 'fullscreen':
+            if (!external) report({ fullscreen: m.value });
+            return;
+          case 'pip':
+            return report({ pictureInPicture: m.value });
+          case 'error':
+            return console.warn(m.message);
+          case 'external-ended':
+            if (!external) return;
+            return emit(
+              m.error ? { type: 'failed', error: m.error } : { type: 'closed' }
+            );
+        }
+      });
+      if (launched) {
+        clearTimeout(linger);
+        shell.send({
+          type: 'external-open',
+          player: launched.id,
+          title: fullTitle(next.item),
+        });
+      }
+      send('player-sync');
+      // The player keeps pause from the last file.
+      send('player-set', {
+        paused: !!next.paused,
+        subtitleDelayMs: next.subtitleDelayMs,
+        ...next.volume,
+      });
+      if (!external)
+        report({ fullscreen: !!currentHost().fullscreen?.active() });
+      if (!adopting) load(next, false);
+    },
+    close() {
+      unsubscribe();
+      unsubscribe = () => {};
+      stopExoStats();
+      if (statsPage) showOverlay(null);
+      if (!external) return send('player-stop');
+      if (!moved) send('player-set', { paused: true });
       linger = setTimeout(
         () => shell.send({ type: 'external-close' }),
         LINGER_MS
       );
-    };
-    // Reloading restarts playback, so only a new url or start does it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, startMs]);
-
-  const setVolume = (volume: number, muted = volume === 0) => {
-    set('volume', Math.round(volume * 100));
-    set('mute', muted);
-    if (!external) storage.set(VOLUME_KEY, { volume, muted });
-    patch({ volume, muted });
-  };
-
-  const toTrack = (t: MpvTrack): Track => ({
-    id: String(t.id),
-    label: ownTrackLabel(t.title, t.lang, t.id),
-    lang: t.lang,
-  });
-  return {
-    state: { ...state, subtitle: subtitleId(state.subtitle) },
-    playhead,
-    audioTracks: tracks.filter((t) => t.type === 'audio').map(toTrack),
-    subtitleTracks: [
-      ...tracks.filter((t) => t.type === 'sub' && !fromServer(t)).map(toTrack),
-      ...externals.map(({ id, label, lang }) => ({ id, label, lang })),
-    ],
-    togglePlay: () => set('pause', !latest.current.state.paused),
-    seek: (ms) => {
-      command('seek', ms / 1000, 'absolute');
-      playhead.set({ positionMs: ms });
     },
-    setVolume: (volume) => setVolume(volume),
-    toggleMute: () => {
-      const { volume, muted } = latest.current.state;
-      setVolume(muted && volume === 0 ? 0.5 : volume, !muted);
-    },
-    setRate: (rate) => set('speed', rate),
-    setAudio: (id) => set('aid', Number(id)),
-    setSubtitle: (id) => {
-      const external = externals.find((e) => e.id === id);
-      if (!external) return set('sid', id ? Number(id) : 'no');
-      const track = loaded(external.url);
-      if (track) set('sid', track.id);
+    setPaused: (paused) => send('player-set', { paused }),
+    seek: (positionMs) => send('player-seek', { positionMs }),
+    setVolume: (volume, muted) => send('player-set', { volume, muted }),
+    setRate: (speed) => send('player-set', { speed }),
+    setAudio: (audio) => send('player-set', { audio }),
+    setSubtitle(id) {
+      const server = file?.subtitles.find((s) => s.id === id);
+      if (!server) return send('player-set', { subtitle: id });
+      const loaded = tracks.find((t) => t.url === server.url);
+      if (loaded) send('player-set', { subtitle: loaded.id });
       else
-        command(
-          'sub-add',
-          external.url,
-          'select',
-          external.label,
-          external.lang
-        );
+        send('player-subtitle-add', {
+          url: server.url,
+          title: server.label,
+          language: server.lang ?? '',
+        });
     },
-    setSubtitleDelay: (ms) => {
-      const delay = clampDelay(ms);
-      set('sub-delay', delay / 1000);
-      saveSubtitleDelay(source.Id, delay);
-      patch({ subtitleDelayMs: delay });
-    },
-    liftSubtitles: setLift,
-    // Only external subtitles can be read; mpv keeps embedded ones to itself.
-    canReadSubtitle: (id) => externals.some((e) => e.id === id),
-    subtitleLines: async () => {
-      const shown = subtitleId(latest.current.state.subtitle);
-      const external = externals.find((e) => e.id === shown);
-      if (!external) return null;
-      const res = await fetch(external.url);
-      return res.ok ? parseSubtitleLines(await res.text()) : null;
-    },
-    subtitleFiles: {
-      types: SUBTITLE_TYPES,
-      add: async (file) => {
-        checkSubtitleFile(file, SUBTITLE_TYPES);
-        const data = await base64(file);
-        shell.send({ type: 'subtitle-file', name: file.name, data, ...target });
-      },
+    setSubtitleDelay: (subtitleDelayMs) =>
+      send('player-set', { subtitleDelayMs }),
+    // The user's own player keeps its own look.
+    setStyle({ subtitleStyle, fit, lift }) {
+      if (external || !subtitleStyle) return;
+      shell.send({
+        type: 'player-style',
+        fit,
+        subtitles: subtitleLook(subtitleStyle, lift),
+      });
     },
     toggleFullscreen: external
-      ? () => command('cycle', 'fullscreen')
+      ? () => send('player-set', { fullscreen: !fullscreen })
       : () => shell.send({ type: 'fullscreen' }),
-    chapters,
-    stats: exo
-      ? {
-          pages: EXO_STATS,
-          page: statsPage,
-          show: setStatsPage,
-          text: exoStats,
-        }
-      : { pages: STATS_PAGES, page: statsPage, show: showStats },
-    external: launched?.name,
+    subtitleFiles: {
+      types: SUBTITLE_TYPES,
+      add: async (added) => {
+        checkSubtitleFile(added, SUBTITLE_TYPES);
+        const data = await base64(added);
+        send('subtitle-file', { name: added.name, data });
+      },
+    },
+    get stats() {
+      return playsWithExoPlayer()
+        ? { pages: EXO_STATS, show: showExoStats }
+        : { pages: STATS_PAGES, show: showOverlay };
+    },
+    picksTracks: true,
+    ownSubtitles: true,
+    ownVolume: external,
+    fits: !external,
     sound: !external,
-    close: external
+    external: launched?.name,
+    closeWindow: external
       ? () => {
           clearTimeout(linger);
           shell.send({ type: 'external-close' });
@@ -695,49 +476,13 @@ export function useShellPlayer(opts: NativePlayerOptions): PlayerController {
       : undefined,
     queueNext: external
       ? (episode) => {
-          if (queued.current) return;
-          queued.current = episode;
-          command(
-            'loadfile',
-            episode.url,
-            'append',
-            -1,
-            fileOptions(episode.startMs, episode.source)
-          );
+          if (queued) return;
+          queued = episode;
+          load(episode, true);
         }
       : undefined,
-    retry:
-      endedEarlyAt !== null
-        ? {
-            label: `Resume from ${clock(endedEarlyAt)}`,
-            run: () => {
-              setEndedEarlyAt(null);
-              patch({ error: null, started: false, waiting: true });
-              load(endedEarlyAt);
-            },
-          }
-        : retryable &&
-            !external &&
-            appBridge()?.platform === 'android' &&
-            // Automatic has tried both engines before a failure reaches the page.
-            settings.android.engine.read() !== 'auto'
-          ? {
-              label: playsWithExoPlayer()
-                ? 'Play with mpv'
-                : 'Play with ExoPlayer',
-              run: () => {
-                retried.current = true;
-                setRetryable(false);
-                patch({ error: null, started: false, waiting: true });
-                shell.send({
-                  type: 'player-retry',
-                  name: playsWithExoPlayer() ? 'mpv' : 'exoplayer',
-                });
-              },
-            }
-          : undefined,
   };
-}
+};
 
 /** mpv's words for a link that gave it no video, which the other engine can't play either. */
 const LINK_FAILURES = new Set(['loading failed', 'unrecognized file format']);
@@ -759,8 +504,11 @@ function statusMeaning(status: number): string | undefined {
   return status >= 500 ? 'server error' : undefined;
 }
 
-function failure(error: string | null, cause?: string): string {
-  const status = Number(cause?.match(/^HTTP error (\d{3})/)?.[1]);
+function failure(
+  error: string | null,
+  status?: number,
+  cause?: string
+): string {
   if (status) {
     const meaning = statusMeaning(status);
     return `the link answered HTTP ${status}${meaning ? ` (${meaning})` : ''}`;
@@ -772,97 +520,44 @@ function failure(error: string | null, cause?: string): string {
   // What a link answering with a web page fails as.
   if (error === 'unrecognized file format')
     return 'the link returned something other than a video';
-  return error ?? 'mpv could not play this version';
+  return error ?? 'the player could not play this version';
 }
 
-/**
- * The user's languages and subtitle mode as mpv's per-file track choices.
- * mpv matches a language across its two- and three-letter codes. Original
- * language takes the language of the server's default audio track, as only
- * the server knows it; other servers may not pick that track from the
- * user's settings, so a named language goes to mpv as it is.
- */
-function trackOptions(prefs: PlaybackPrefs, source: SourceInfo): string[] {
-  const options: string[] = [];
-  options.push(...listOption('alang', audioCodes(prefs, source)));
-  const slang = listOption('slang', subtitleLanguages(prefs));
-  switch (prefs.SubtitleMode) {
-    case 'None':
-      options.push('sid=no');
-      break;
-    case 'OnlyForced':
-      options.push('subs-fallback=no', 'subs-fallback-forced=always');
-      break;
-    case 'Always':
-      options.push(
-        ...slang,
-        'subs-fallback=yes',
-        'subs-with-matching-audio=yes'
-      );
-      break;
-    case 'Smart':
-      options.push(...slang, 'subs-with-matching-audio=no');
-      break;
-    default:
-      options.push(...slang);
-  }
-  return options;
+/** The user's subtitle style in the units mpv and libass share. */
+function subtitleLook(style: SubtitleStyle, lift: number) {
+  return {
+    scale: subtitleScale(style),
+    bold: style.bold,
+    color: mpvColor(style.textColor),
+    outlineColor: mpvColor(style.outlineColor),
+    outlineSize: MPV_OUTLINE[style.outline],
+    shadowSize: style.shadow ? MPV_SHADOW : 0,
+    font: style.font === 'default' ? undefined : style.font,
+    backColor: mpvColor(style.backgroundColor, style.backgroundOpacity),
+    box: style.backgroundOpacity > 0,
+    override: style.overrideStyled ? 'force' : 'scale',
+    position: 100 - subtitleHeight(style, lift),
+  };
 }
 
-function audioCodes(prefs: PlaybackPrefs, source: SourceInfo): string[] {
-  const original = source.MediaStreams?.find(
-    (s) => s.Type === 'Audio' && s.Index === source.DefaultAudioStreamIndex
-  )?.Language;
-  return audioLanguages(prefs)
-    .map((l) => (l === ORIGINAL_LANGUAGE ? original : l))
-    .filter((l): l is string => !!l);
-}
-
-/** Commas separate the options themselves, so each further entry is appended. */
-function listOption(name: string, values: string[]): string[] {
-  return values.map((v, i) => `${name}${i ? '-append' : ''}=${v}`);
-}
-
-function setProp(name: string, value: unknown) {
-  appBridge()?.send({ type: 'mpv-set-prop', name, value });
-}
-
-/** Image subtitles keep their own size. */
-function applySubtitleStyle(
-  style: SubtitleStyle | undefined,
-  image: boolean
-): void {
-  if (!style) return;
-  setProp('sub-scale', image ? 1 : subtitleScale(style));
-  setProp('sub-bold', style.bold);
-  setProp('sub-color', mpvColor(style.textColor));
-  setProp('sub-outline-color', mpvColor(style.outlineColor));
-  setProp('sub-outline-size', MPV_OUTLINE[style.outline]);
-  setProp(
-    'sub-back-color',
-    mpvColor(style.backgroundColor, style.backgroundOpacity)
-  );
-  setProp(
-    'sub-border-style',
-    style.backgroundOpacity > 0 ? 'background-box' : 'outline-and-shadow'
-  );
-  setProp('sub-ass-override', style.overrideStyled ? 'force' : 'scale');
-}
-
-export function applyPlayerSettings(): void {
-  const { hardwareDecoding, audioChannels, audioDevice } = settings.desktop;
+/** This device's player settings, which each app applies its own way. */
+export function playerSettings() {
   const android = appBridge()?.platform === 'android';
-  const channels = audioChannels.read();
-  // On Android, auto-safe only tries copying every frame back from MediaCodec.
-  // TVs copy them: some draw direct frames wrong, and they have no battery to save.
-  const hwdec = !android
-    ? 'auto-safe'
-    : currentHost().tv
-      ? 'mediacodec-copy'
-      : 'mediacodec,mediacodec-copy';
-  setProp('hwdec', hardwareDecoding.read() ? hwdec : 'no');
-  setProp('audio-channels', channels === 'auto' ? 'auto-safe' : channels);
-  setProp('audio-spdif', passthroughValue());
-  setProp('audio-delay', settings.sound.delayMs.read() / 1000);
-  if (!android) setProp('audio-device', audioDevice.read());
+  const { video, audio } = settings;
+  return {
+    hardwareDecoding: video.hardwareDecoding.read(),
+    audioChannels: audio.channels.read(),
+    ...passthroughFormats(),
+    audioDelayMs: audio.delayMs.read(),
+    dolbyVision: video.dolbyVision.read(),
+    dialogueBoost: audio.dialogueBoost.read(),
+    nightMode: audio.nightMode.read(),
+    ac3Encode: audio.ac3Encode.read(),
+    ...(android
+      ? {
+          frameRate: video.frameRate.read(),
+          tunneling: video.tunneling.read(),
+        }
+      : { audioDevice: audio.device.read() }),
+  };
 }

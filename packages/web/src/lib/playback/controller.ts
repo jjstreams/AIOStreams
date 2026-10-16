@@ -16,6 +16,8 @@ export interface Track {
 export interface PlayerState {
   /** The first frame has played. */
   started: boolean;
+  /** The file is open and its tracks known, whether or not it plays yet. */
+  loaded: boolean;
   paused: boolean;
   waiting: boolean;
   durationMs: number;
@@ -35,7 +37,7 @@ export interface PlayerState {
 }
 
 /** What some players add to what a browser's video can do. */
-export type PlayerFeature = 'audio' | 'chapters' | 'stats';
+export type PlayerFeature = 'audio' | 'chapters' | 'stats' | 'headers';
 
 /** Engines that list a file's audio tracks let the page's own video switch them. */
 export const browserFeatures: readonly PlayerFeature[] =
@@ -48,6 +50,7 @@ export interface PlayerController {
   audioTracks: Track[];
   subtitleTracks: Track[];
   togglePlay(): void;
+  setPaused(paused: boolean): void;
   seek(ms: number): void;
   setVolume(volume: number): void;
   toggleMute(): void;
@@ -89,8 +92,12 @@ export interface PlayerController {
   queueNext?: (episode: QueuedEpisode) => void;
   /** Whether the app's sound settings apply, which they do to its own player. */
   sound?: boolean;
+  /** Whether the picture follows the page's fit setting. */
+  fit?: boolean;
   /** Plays the file again after it failed, from where it stopped or on another engine. */
   retry?: { label: string; run(): void };
+  /** Others watch along, so nothing acts on its own, like skipping or speeding up. */
+  shared?: boolean;
 }
 
 export interface QueuedEpisode {
@@ -98,21 +105,19 @@ export interface QueuedEpisode {
   source: SourceInfo;
   startMs: number;
   url: string;
+  headers?: Record<string, string>;
 }
 
 export interface PlayerOptions {
+  client: JellyfinClient;
+  item: BaseItemDto;
   source: SourceInfo;
+  url: string;
+  headers?: Record<string, string>;
   startMs: number;
   onEnded(): void;
   prefs?: PlaybackPrefs;
   subtitleStyle?: SubtitleStyle;
-}
-
-/** For players drawn beneath the page, which load the stream themselves. */
-export interface NativePlayerOptions extends PlayerOptions {
-  client: JellyfinClient;
-  item: BaseItemDto;
-  url: string;
   /** Where an external subtitle is, when not the server's address, as for a download. */
   subtitleUrl?: (stream: MediaStream) => string | null;
   /** Plays in this player's own window instead. */
@@ -121,6 +126,7 @@ export interface NativePlayerOptions extends PlayerOptions {
   onClosed?: () => void;
   /** That player moved on to the episode it was given with `queueNext`. */
   onAdvance?: (episode: QueuedEpisode) => void;
+  startPaused?: boolean;
 }
 
 export const VOLUME_KEY = 'aiostreams-web-volume';
@@ -136,6 +142,7 @@ export function storedVolume(max = 1): { volume: number; muted: boolean } {
 export function initialState(source: SourceInfo): PlayerState {
   return {
     started: false,
+    loaded: false,
     paused: false,
     waiting: true,
     durationMs: source.RunTimeTicks ? source.RunTimeTicks / 10_000 : 0,

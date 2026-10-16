@@ -1,33 +1,16 @@
 import React from 'react';
 import type { Host } from '..';
-import { onSettingsChange, settings } from '../../settings';
-import { appBridge, type ShellMessage } from './bridge';
+import { appBridge, ask, bridgeStore, type ShellAnswer } from './bridge';
 import { shellDownloads } from './downloads';
-import { useShellPlayer } from './player';
-import { soundOptions } from './sound';
+import { appEngine } from './player';
 import { resolveYouTube } from './youtube';
 
-export type DiscordStatus = Extract<ShellMessage, { type: 'discord-status' }>;
+export type DiscordStatus = ShellAnswer<'discord-status'>;
 
-let discordStatus: DiscordStatus | null = null;
-const discordListeners = new Set<() => void>();
-
-function subscribeDiscord(listener: () => void): () => void {
-  discordListeners.add(listener);
-  return () => discordListeners.delete(listener);
-}
-
-export function useDiscordStatus(): DiscordStatus | null {
-  return React.useSyncExternalStore(subscribeDiscord, () => discordStatus);
-}
+export const useDiscordStatus = bridgeStore('discord-status').use;
 
 export function checkDiscord(): void {
   appBridge()?.send({ type: 'discord-check' });
-}
-
-function onDiscordStatus(next: DiscordStatus) {
-  discordStatus = next;
-  for (const listener of discordListeners) listener();
 }
 
 /** The browser's own menu only where it edits or copies; Shift still opens it. */
@@ -40,27 +23,13 @@ function onContextMenu(e: MouseEvent) {
 
 let windowFullscreen = false;
 
-/** Follows the window's full screen and Discord, and keeps the browser's menu off the page. */
+/** Follows the window's full screen, and keeps the browser's menu off the page. */
 export function setupDesktop(): () => void {
-  let options = '';
-  const sendOptions = () => {
-    const next = {
-      dolbyVision: settings.desktop.dolbyVision.read(),
-      ...soundOptions(),
-    };
-    if (JSON.stringify(next) === options) return;
-    options = JSON.stringify(next);
-    appBridge()?.send({ type: 'player-options', ...next });
-  };
-  sendOptions();
-  const unsubscribeSettings = onSettingsChange(sendOptions);
   const unsubscribe = appBridge()?.subscribe((m) => {
     if (m.type === 'fullscreen') windowFullscreen = m.value;
-    else if (m.type === 'discord-status') onDiscordStatus(m);
   });
   window.addEventListener('contextmenu', onContextMenu);
   return () => {
-    unsubscribeSettings();
     unsubscribe?.();
     window.removeEventListener('contextmenu', onContextMenu);
   };
@@ -72,12 +41,13 @@ export type AudioDevice = { name: string; description: string };
 export function useAudioDevices(): AudioDevice[] | null {
   const [devices, setDevices] = React.useState<AudioDevice[] | null>(null);
   React.useEffect(() => {
-    const bridge = appBridge();
-    const unsubscribe = bridge?.subscribe((m) => {
-      if (m.type === 'audio-devices') setDevices(m.devices ?? []);
-    });
-    bridge?.send({ type: 'audio-devices' });
-    return unsubscribe;
+    let live = true;
+    ask({ type: 'audio-devices' }, 'audio-devices')
+      .then((m) => live && setDevices(m.devices ?? []))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
   }, []);
   return devices;
 }
@@ -89,8 +59,8 @@ export function openMpvConfig(): void {
 export const desktopHost: Host = {
   name: 'desktop',
   device: () => ({ name: appBridge()?.device }),
-  usePlayer: useShellPlayer,
-  playerFeatures: ['audio', 'chapters', 'stats'],
+  player: appEngine,
+  playerFeatures: ['audio', 'chapters', 'stats', 'headers'],
   resolveYouTube,
   downloads: {
     ...shellDownloads,

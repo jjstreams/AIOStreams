@@ -43,9 +43,9 @@ export function useNowPlaying(
   actions: Actions
 ) {
   const { client } = useSession();
-  const [discord] = useSetting(settings.discord['playing']);
-  const [pip] = useSetting(settings.android.pip);
-  const [background] = useSetting(settings.android.background);
+  const [discord] = useSetting(settings.app.discord['playing']);
+  const [pip] = useSetting(settings.app.pip);
+  const [background] = useSetting(settings.app.background);
   const show = useItem(item.SeriesId ?? item.Id!);
   const imdb = (item.Type === 'Episode' ? show.data : item)?.ProviderIds?.Imdb;
   const title = itemTitle(item);
@@ -136,7 +136,7 @@ export function useNowPlaying(
     };
   }, [press]);
 
-  const app = host.usePlayer ? undefined : host.mediaSession;
+  const app = host.player ? undefined : host.mediaSession;
   React.useEffect(() => {
     if (!app) return;
     const stop = app.listen?.(press);
@@ -190,7 +190,7 @@ export function useNowPlaying(
   ]);
 
   const session =
-    !host.usePlayer && !app && 'mediaSession' in navigator
+    !host.player && !app && 'mediaSession' in navigator
       ? navigator.mediaSession
       : null;
 

@@ -8,7 +8,7 @@ import { landscapeUrl } from '../../lib/images';
 import { episodeCode, itemSubtitle, ticksToMs } from '../../lib/format';
 import { navigate, to, versionsPath } from '../../lib/paths';
 import { playableSources } from '../../lib/playback/play';
-import { streamUrl } from '../../lib/playback/stream';
+import { playerUrl, requiredHeaders } from '../../lib/playback/stream';
 import {
   focusOn,
   inputCount,
@@ -119,12 +119,18 @@ export function useNextEpisodePrompt({
   player,
   segments,
   onBack,
+  group,
 }: {
   item: BaseItemDto;
   source: SourceInfo;
   player: PlayerController;
   segments: MediaSegmentDto[] | null | undefined;
   onBack: () => void;
+  /** Moves a watch party on instead, for everyone. */
+  group?: {
+    step(direction: 'next' | 'previous', episode: BaseItemDto): void;
+    play(episode: BaseItemDto): void;
+  };
 }) {
   const { client } = useSession();
   const queryClient = useQueryClient();
@@ -173,6 +179,11 @@ export function useNextEpisodePrompt({
   const playOne = React.useCallback(
     async (key: string, episode: BaseItemDto | null) => {
       if (!episode || leaving.current) return false;
+      if (group) {
+        if (key === 'next' || key === 'previous') group.step(key, episode);
+        else group.play(episode);
+        return true;
+      }
       if (wanted.current === key) return true;
       wanted.current = key;
       setLoading(key);
@@ -203,7 +214,7 @@ export function useNextEpisodePrompt({
         }
       }
     },
-    [queryClient, infoOptions, source, fallbackFirst]
+    [queryClient, infoOptions, source, fallbackFirst, group]
   );
   React.useEffect(() => dismissNotice, []);
   const playNext = React.useCallback(
@@ -223,7 +234,7 @@ export function useNextEpisodePrompt({
   const playOn = React.useCallback(
     ({ pause = false } = {}) => {
       if (!next) return Promise.resolve(false);
-      if (asksFirst(stillWatching)) {
+      if (!group && asksFirst(stillWatching)) {
         const { state, togglePlay } = latestPlayer.current;
         if (pause && !state.paused) togglePlay();
         setAsking(true);
@@ -232,7 +243,7 @@ export function useNextEpisodePrompt({
       countPlayedOn();
       return playNext();
     },
-    [next, stillWatching, playNext, latestPlayer]
+    [next, stillWatching, playNext, latestPlayer, group]
   );
 
   // A player in its own window takes input there; its pauses are what the page sees of it.
@@ -280,14 +291,17 @@ export function useNextEpisodePrompt({
     let current = true;
     queryClient
       .fetchQuery(infoOptions(next.Id!))
-      .then((info) => {
+      .then(async (info) => {
         const target = carryOn(playableSources(info), source, fallbackFirst);
         if (!current || !target) return;
+        const url = await playerUrl(client, next.Id!, target);
+        if (!current || !url) return;
         queueNext.current?.({
           itemId: next.Id!,
           source: target,
           startMs: resumeMs(next),
-          url: streamUrl(client, next.Id!, target, info.PlaySessionId),
+          url,
+          headers: requiredHeaders(target),
         });
       })
       .catch(() => {});

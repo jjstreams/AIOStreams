@@ -4,6 +4,7 @@ import {
   BiCheck,
   BiChevronRight,
   BiDislike,
+  BiGroup,
   BiHeart,
   BiPlay,
   BiRevision,
@@ -48,6 +49,7 @@ import {
   dayLabel,
   duration,
   episodeCode,
+  fullTitle,
   itemSubtitle,
   ticksToMs,
   unavailableLabel,
@@ -80,6 +82,8 @@ import { useHold } from '../lib/use-hold';
 import { useExternalReturn } from '../lib/playback/external-return';
 import { CachedImage } from '../components/cached-image';
 import { TrailerButton } from '../components/trailers';
+import { openPartySheet } from '../components/party/party-sheet';
+import { useParty } from '../lib/party/party';
 import {
   DownloadButton,
   ShowDownloadMenu,
@@ -345,6 +349,7 @@ function Header({ item, season }: { item: BaseItemDto; season?: BaseItemDto }) {
       ? () => picker.play(target, { startMs: resumeMs, held: true })
       : undefined
   );
+  const inParty = !!useParty();
   const holdRestart = useHold(
     target ? () => picker.play(target, { startMs: 0, held: true }) : undefined
   );
@@ -467,6 +472,33 @@ function Header({ item, season }: { item: BaseItemDto; season?: BaseItemDto }) {
             </div>
           )}
           <TrailerButton item={item} />
+          <Tooltip
+            trigger={
+              <IconButton
+                data-ui="item-action"
+                data-name="party"
+                intent="gray-subtle"
+                className="rounded-full"
+                icon={<BiGroup />}
+                aria-label={inParty ? 'Watch party' : 'Watch together'}
+                onClick={() =>
+                  openPartySheet(
+                    target && !inParty
+                      ? {
+                          play: {
+                            title: fullTitle(target),
+                            run: () =>
+                              picker.play(target, { startMs: resumeMs }),
+                          },
+                        }
+                      : {}
+                  )
+                }
+              />
+            }
+          >
+            {inParty ? 'Watch party' : 'Watch together'}
+          </Tooltip>
           <ItemToggles
             itemId={item.Id!}
             type={item.Type}
@@ -649,7 +681,7 @@ function Seasons({
   focusEpisodeId?: string;
   onSeason: (season: BaseItemDto | undefined) => void;
 }) {
-  const [layoutPref] = useSetting(settings.episodeLayout);
+  const [layoutPref] = useSetting(settings.interface.episodeLayout);
   const wide = useMediaQuery('(min-width: 1024px)');
   const layout = layoutPref === 'auto' ? (wide ? 'row' : 'list') : layoutPref;
   const seasons = useSeasons(series.Id!, true);

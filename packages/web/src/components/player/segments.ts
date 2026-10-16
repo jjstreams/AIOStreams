@@ -52,7 +52,7 @@ export function useSegmentSkip({
   notice(text: string): void;
 }) {
   const segments = React.useMemo(() => segmentsOf(items), [items]);
-  const [actions] = useSetting(settings.segmentActions);
+  const [actions] = useSetting(settings.playback.segmentActions);
   const { started } = player.state;
   const latest = useLatest(player);
   const insideIds = usePlayhead(player.playhead, ({ positionMs }) =>
@@ -64,7 +64,11 @@ export function useSegmentSkip({
   const inside = segments.filter((s) =>
     insideIds.split('|').includes(segmentId(s))
   );
-  const actionOf = (s: Segment) => actions[s.type as SegmentType] ?? 'ask';
+  // With others watching, a skip is everyone's, so it waits to be asked for.
+  const actionOf = (s: Segment) => {
+    const action = actions[s.type as SegmentType] ?? 'ask';
+    return action === 'skip' && player.shared ? 'ask' : action;
+  };
   // Each segment skips once; seeking back into one offers the button instead.
   const skipped = React.useRef(new Set<string>());
   const offered = inside.find(

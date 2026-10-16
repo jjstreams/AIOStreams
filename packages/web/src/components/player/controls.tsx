@@ -34,7 +34,7 @@ import { usePlayerGestures } from './gestures';
 import { useBurstSeek, useFileDrop, useIdle, usePositionClock } from './hooks';
 import { usePlayerKeys } from './keys';
 import { ScreenLock } from './lock';
-import { canFit, FIT_LABELS, OptionButtons } from './options';
+import { FIT_LABELS, OptionButtons } from './options';
 import { SeekBar } from './seek-bar';
 import { skipLabel, useSegmentSkip } from './segments';
 import { useHeldSpeed } from './speed';
@@ -64,6 +64,7 @@ export function PlayerControls({
   offeringNext = false,
   caption,
   steps,
+  onParty,
 }: {
   item: BaseItemDto;
   player: PlayerController;
@@ -79,6 +80,7 @@ export function PlayerControls({
   caption?: string;
   /** What previous and next move between, where it isn't the show's episodes. */
   steps?: string;
+  onParty?: () => void;
 }) {
   const { state } = player;
   const latest = useLatest(player);
@@ -129,7 +131,7 @@ export function PlayerControls({
     latest.current.togglePlay();
   };
 
-  const [seekStep] = useSetting(settings.seekStep);
+  const [seekStep] = useSetting(settings.controls.seekStep);
   const [burstSeek, seekingTo] = useBurstSeek(player);
   const seekBy = (deltaMs: number) => {
     burstSeek(deltaMs);
@@ -170,7 +172,7 @@ export function PlayerControls({
     player.subtitleFiles ? addSubtitleFile : undefined
   );
 
-  const [fit, setFit] = useSetting(settings.videoFit);
+  const [fit, setFit] = useSetting(settings.video.fit);
   const shown = useLatest(visible);
   const gestures = usePlayerGestures({
     player,
@@ -200,7 +202,7 @@ export function PlayerControls({
         latest.current.seek(s.toMs);
       wake();
     },
-    onPinch: canFit(player)
+    onPinch: player.fit
       ? (out) => {
           const next = out ? 'crop' : 'fit';
           if (next === fit) return;
@@ -526,6 +528,7 @@ export function PlayerControls({
             onAddFile={() => fileInput.current?.click()}
             onSyncByEar={() => setByEar(true)}
             onSyncToLine={pickLine}
+            onParty={onParty}
             notice={showNotice}
           />
         </div>

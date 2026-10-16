@@ -21,6 +21,7 @@ import {
   LuRatio,
   LuStretchHorizontal,
   LuUndo2,
+  LuUsers,
 } from 'react-icons/lu';
 import {
   DropdownMenu,
@@ -30,7 +31,6 @@ import {
 import { cn } from '@aiostreams/ui/core/styling';
 import { clock } from '../../lib/format';
 import { currentHost } from '../../lib/hosts';
-import { appBridge } from '../../lib/hosts/shell/bridge';
 import { chapterAt } from '../../lib/playback/chapters';
 import type { PlayerController, Track } from '../../lib/playback/controller';
 import {
@@ -57,6 +57,7 @@ import {
 import { splitByLanguage } from '../../lib/subtitles/tracks';
 import { subtitleLanguages, usePlaybackPrefs } from '../../lib/user-config';
 import { ControlButton } from './buttons';
+import { useParty } from '../../lib/party/party';
 import { RATES, rateLabel } from './keys';
 import { usePlayhead } from '../../lib/playback/playhead';
 
@@ -184,12 +185,8 @@ const FIT_ICONS: Record<VideoFit, React.ReactNode> = {
   stretch: <LuStretchHorizontal />,
 };
 
-/** Whether the page decides how the picture fits; a player in its own window does that itself. */
-export const canFit = (player: PlayerController) =>
-  (!currentHost().usePlayer || !!appBridge()) && !player.external;
-
 function FitButton({ notice }: { notice: (text: string) => void }) {
-  const [fit, setFit] = useSetting(settings.videoFit);
+  const [fit, setFit] = useSetting(settings.video.fit);
   const next = VIDEO_FITS[(VIDEO_FITS.indexOf(fit) + 1) % VIDEO_FITS.length];
   return (
     <ControlButton
@@ -294,9 +291,9 @@ function SubtitleStyleSteppers() {
 }
 
 function SoundControls() {
-  const [boost, setBoost] = useSetting(settings.sound.dialogueBoost);
-  const [nightMode, setNightMode] = useSetting(settings.sound.nightMode);
-  const [delay, setDelay] = useSetting(settings.sound.delayMs);
+  const [boost, setBoost] = useSetting(settings.audio.dialogueBoost);
+  const [nightMode, setNightMode] = useSetting(settings.audio.nightMode);
+  const [delay, setDelay] = useSetting(settings.audio.delayMs);
   const at = DIALOGUE_BOOSTS.indexOf(boost);
   return (
     <>
@@ -404,10 +401,12 @@ export function OptionButtons({
   onAddFile,
   onSyncByEar,
   onSyncToLine,
+  onParty,
   notice,
 }: {
   player: PlayerController;
   onMenu(open: boolean): void;
+  onParty?: () => void;
   onVersions?: () => void;
   onEpisodes?: () => void;
   onAddFile(): void;
@@ -430,8 +429,33 @@ export function OptionButtons({
     chapterAt(chapters, h.positionMs)
   );
   const tv = !!currentHost().tv;
+  const unread = useParty()?.unread ?? 0;
   return (
     <div className="ml-auto flex items-center sm:gap-1">
+      {onParty && (
+        <ControlButton
+          name="party"
+          label={
+            unread
+              ? `Watch party, ${unread} new ${unread === 1 ? 'message' : 'messages'}`
+              : player.shared
+                ? 'Watch party'
+                : 'Watch together'
+          }
+          onClick={onParty}
+          className="relative"
+        >
+          <LuUsers />
+          {unread > 0 && (
+            <span
+              data-ui="party-unread"
+              className="absolute right-0.5 top-0.5 min-w-4 rounded-full bg-brand-500 px-1 text-[10px] font-semibold leading-4 text-white"
+            >
+              {unread > 9 ? '9+' : unread}
+            </span>
+          )}
+        </ControlButton>
+      )}
       {onEpisodes && (
         <ControlButton name="episodes" label="Episodes" onClick={onEpisodes}>
           <LuGalleryVerticalEnd />
@@ -525,7 +549,7 @@ export function OptionButtons({
           onOpenChange={onMenu}
         />
       )}
-      {canFit(player) && <FitButton notice={notice} />}
+      {player.fit && <FitButton notice={notice} />}
       {player.stats && (
         <Menu
           name="statistics"

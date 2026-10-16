@@ -10,6 +10,8 @@ import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.extractor.text.CuesWithTiming
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory
+import io.github.viren070.aiostreams.playback.SubtitleFont
+import io.github.viren070.aiostreams.playback.SubtitleLook
 import androidx.media3.extractor.text.SubtitleParser
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
@@ -27,36 +29,37 @@ internal class SubtitleStyle {
     private var color = Color.WHITE
     private var outlineColor = Color.BLACK
     private var outlineSize = 1.65
+    private var shadowSize = 0.0
+    private var font: SubtitleFont? = null
     private var backColor = Color.TRANSPARENT
     private var box = false
     private var bold = false
     private var override = AssStyle.SCALE
 
-    /** False for a property that isn't a subtitle style. */
-    fun set(name: String, value: String): Boolean {
-        when (name) {
-            "sub-visibility" -> visible = value == "yes"
-            "sub-scale" -> scale = value.toDoubleOrNull() ?: 1.0
-            "sub-pos" -> position = value.toDoubleOrNull() ?: 100.0
-            "sub-ass-force-margins" -> forceMargins = value == "yes"
-            "sub-color" -> color = colorOf(value) ?: color
-            "sub-outline-color" -> outlineColor = colorOf(value) ?: outlineColor
-            "sub-outline-size" -> outlineSize = value.toDoubleOrNull() ?: outlineSize
-            "sub-back-color" -> backColor = colorOf(value) ?: backColor
-            "sub-border-style" -> box = value == "background-box"
-            "sub-bold" -> bold = value == "yes"
-            "sub-ass-override" -> override = when (value) {
-                "no" -> AssStyle.NONE
-                "force", "strip" -> AssStyle.FORCE
-                else -> AssStyle.SCALE
-            }
-            else -> return false
-        }
-        return true
+    fun apply(look: SubtitleLook, forceMargins: Boolean) {
+        scale = look.scale
+        position = look.position
+        this.forceMargins = forceMargins
+        color = colorOf(look.color) ?: color
+        outlineColor = colorOf(look.outlineColor) ?: outlineColor
+        outlineSize = look.outlineSize
+        shadowSize = look.shadowSize
+        font = look.font
+        backColor = colorOf(look.backColor) ?: backColor
+        box = look.box
+        bold = look.bold
+        override = if (look.forceStyle) AssStyle.FORCE else AssStyle.SCALE
     }
 
     fun apply(view: SubtitleView) {
-        val edge = if (!box && outlineSize > 0) CaptionStyleCompat.EDGE_TYPE_OUTLINE else CaptionStyleCompat.EDGE_TYPE_NONE
+        // The view draws one edge, so a shadow takes the outline's place.
+        val edge = when {
+            box -> CaptionStyleCompat.EDGE_TYPE_NONE
+            shadowSize > 0 -> CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
+            outlineSize > 0 -> CaptionStyleCompat.EDGE_TYPE_OUTLINE
+            else -> CaptionStyleCompat.EDGE_TYPE_NONE
+        }
+        val family = font?.let { Typeface.create(it.id, Typeface.NORMAL) } ?: Typeface.DEFAULT
         view.setStyle(
             CaptionStyleCompat(
                 color,
@@ -64,7 +67,7 @@ internal class SubtitleStyle {
                 Color.TRANSPARENT,
                 edge,
                 outlineColor,
-                if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT,
+                Typeface.create(family, if (bold) Typeface.BOLD else Typeface.NORMAL),
             ),
         )
         view.setApplyEmbeddedStyles(override != AssStyle.FORCE)
@@ -74,10 +77,13 @@ internal class SubtitleStyle {
     }
 
     fun assStyle() = AssStyle(
-        override, assColor(color), assColor(outlineColor), assColor(backColor), outlineSize,
+        // Outside a box, ASS draws the shadow in its back colour.
+        override, assColor(color), assColor(outlineColor), assColor(if (box) backColor else outlineColor), outlineSize,
         // mpv's numbers for outline-and-shadow and background-box.
         if (box) 4 else 1,
         bold,
+        shadowSize,
+        font?.file?.takeIf { it.canRead() }?.path,
     )
 
     private companion object {
@@ -89,6 +95,14 @@ internal class SubtitleStyle {
             (Color.red(argb) shl 24) or (Color.green(argb) shl 16) or (Color.blue(argb) shl 8) or (255 - Color.alpha(argb))
     }
 }
+
+/** WebVTT's automatic line arrives as the last line, which the view's bottom padding never moves. */
+internal fun unplaced(cue: Cue): Cue =
+    if (cue.verticalType == Cue.TYPE_UNSET && cue.lineType == Cue.LINE_TYPE_NUMBER && cue.line == -1f) {
+        cue.buildUpon().setLine(Cue.DIMEN_UNSET, Cue.TYPE_UNSET).build()
+    } else {
+        cue
+    }
 
 /** A text subtitle's lines, which the engine shows on the video's frames so its delay applies. */
 @OptIn(UnstableApi::class)

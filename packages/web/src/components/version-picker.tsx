@@ -34,6 +34,7 @@ import {
 } from '../lib/queries';
 import { directUrl } from '../lib/playback/stream';
 import {
+  downloadable,
   downloadsHost,
   useAddDownloads,
   useFindDownloaded,
@@ -41,6 +42,7 @@ import {
   type Download,
 } from '../lib/downloads';
 import { chosenPlayer } from '../lib/playback/player-choice';
+import { party } from '../lib/party/party';
 import {
   lastVersions,
   noticeSources,
@@ -87,7 +89,7 @@ export function useStraightPlay(): (
   item: BaseItemDto,
   startMs: number
 ) => boolean {
-  const [autoPlay] = useSetting(settings.autoPlayFirst);
+  const [autoPlay] = useSetting(settings.playback.autoPlayFirst);
   return React.useCallback(
     (item, startMs) => autoPlay || !!rememberedVersion(item, startMs),
     [autoPlay]
@@ -129,7 +131,7 @@ export function VersionPickerProvider({
   const playVersion = usePlay();
   const addDownloads = useAddDownloads();
   const downloaded = useFindDownloaded();
-  const [autoPick] = useSetting(settings.autoPlayFirst);
+  const [autoPick] = useSetting(settings.playback.autoPlayFirst);
   const latest = React.useRef({
     straight,
     queryClient,
@@ -155,7 +157,12 @@ export function VersionPickerProvider({
       const { queryClient, infoOptions, playVersion } = latest.current;
       const last = rememberedVersion(item, startMs);
       // The player page finds the version itself, and lists them if it is gone.
-      if (last && !currentHost().play && chosenPlayer().kind !== 'link') {
+      if (
+        last &&
+        !currentHost().play &&
+        chosenPlayer().kind !== 'link' &&
+        party.state()?.status !== 'live'
+      ) {
         navigate(to.play(item.Id!, last, startMs));
         return;
       }
@@ -313,10 +320,11 @@ function Versions({
   const addDownloads = useAddDownloads();
   const replaceVersion = useReplaceVersion();
   const download = request.download;
-  const canDownload = !!downloadsHost();
   const [startMs, setStartMs] = React.useState(request.startMs);
   const [filter, setFilter] = React.useState('');
-  const sources = playableSources(info.data);
+  const sources = playableSources(info.data).filter(
+    (s) => !download || downloadable(s)
+  );
   const notices = noticeSources(info.data);
   const terms = filter.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = terms.length
@@ -577,7 +585,7 @@ function Versions({
         {shown.map((source) => {
           const link = directUrl(client, item.Id!, source);
           const actions = [
-            ...(canDownload && !download
+            ...(!download && downloadable(source)
               ? [
                   {
                     name: 'download',

@@ -99,9 +99,9 @@ function migrate() {
   const preset =
     OLD_TEMPLATES[template] ??
     LINK_PLAYERS.find((p) => p.template === template)?.id;
-  if (!preset) settings.playerLink.write(template);
+  if (!preset) settings.player.link.write(template);
   if (storage.get<boolean>('aiostreams-web-external-always') === true)
-    settings.player.write(preset ?? CUSTOM_LINK);
+    settings.player.choice.write(preset ?? CUSTOM_LINK);
   storage.remove('aiostreams-web-external-player');
   storage.remove('aiostreams-web-external-always');
 }
@@ -131,23 +131,33 @@ export function linkPreset(id: string) {
 export function chosenPlayer(): PlayerChoice {
   const host = currentHost();
   if (host.play) return { kind: 'app' };
-  const id = settings.player.read();
+  const id = settings.player.choice.read();
   const launched = LAUNCHED_PLAYERS.find((p) => p.id === id);
   if (launched && host.name === 'desktop')
     return { kind: 'launched', ...launched };
   const preset = linkPreset(id);
   if (preset) return { kind: 'link', ...preset };
-  const template = settings.playerLink.read().trim();
+  const template = settings.player.link.read().trim();
   if (id === CUSTOM_LINK && template)
     return { kind: 'link', id, name: 'your player', template };
   return { kind: 'app' };
+}
+
+/** What the player chosen here plays besides a plain address. */
+export function playerSupport(): { headers: boolean; youtube: boolean } {
+  const host = currentHost();
+  const page = !host.play && !!host.player && chosenPlayer().kind !== 'link';
+  return {
+    headers: page && !!host.playerFeatures?.includes('headers'),
+    youtube: page && !!host.resolveYouTube,
+  };
 }
 
 /** `launched` are the players the desktop app found it can start. */
 export function playerOptions(
   launched: readonly string[]
 ): { value: string; label: string }[] {
-  const current = settings.player.read();
+  const current = settings.player.choice.read();
   const os = platform();
   return [
     {

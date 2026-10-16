@@ -14,12 +14,17 @@ import {
 } from '../lib/queries';
 import { lastVersions, playableSources } from '../lib/playback/play';
 import { chosenPlayer } from '../lib/playback/player-choice';
-import { directUrl, streamUrl } from '../lib/playback/stream';
+import {
+  directUrl,
+  requiredHeaders,
+  useYouTubeStream,
+} from '../lib/playback/stream';
 import { PlaybackReporter } from '../lib/playback/reporter';
-import { subtitleUrl, textSubtitles } from '../lib/subtitles/tracks';
 import { currentHost } from '../lib/hosts';
 import { useFeature } from '../lib/server-info';
-import { useBrowserPlayer, usePlayerFullscreen } from '../lib/hosts/browser';
+import { usePlayerFullscreen } from '../lib/playback/fullscreen';
+import { usePlayer } from '../lib/playback/use-player';
+import { videoEngine } from '../lib/playback/video';
 import { useNowPlaying } from '../lib/playback/now-playing';
 import {
   useShowPicks,
@@ -27,7 +32,7 @@ import {
   withShowPick,
 } from '../lib/playback/show-tracks';
 import type {
-  NativePlayerOptions,
+  PlayerOptions,
   PlayerController,
 } from '../lib/playback/controller';
 import {
@@ -43,6 +48,7 @@ import {
 } from '../lib/subtitles/style';
 import { usePlaybackPrefs, type PlaybackPrefs } from '../lib/user-config';
 import { backdropUrl } from '../lib/images';
+import { fullTitle } from '../lib/format';
 import { goBack, navigate, to, versionsPath } from '../lib/paths';
 import { PlayerControls } from '../components/player/controls';
 import {
@@ -62,6 +68,12 @@ import type {
 } from '../lib/types';
 import { useDownloadOf, type Download } from '../lib/downloads';
 import { CachedImage } from '../components/cached-image';
+import { party, useParty } from '../lib/party/party';
+import { leavePartyPlayback, usePartyBinding } from '../lib/party/follow';
+import { usePlayForParty } from '../lib/party/actions';
+import { usePartyPlayer } from '../lib/party/playback';
+import { PartyLayer } from '../components/party/party-layer';
+import { openPartySheet } from '../components/party/party-sheet';
 
 interface PlayerProps {
   item: BaseItemDto;
@@ -69,8 +81,10 @@ interface PlayerProps {
   playSessionId: string | null;
   startMs: number;
   prefs: PlaybackPrefs;
-  launched?: NativePlayerOptions['launched'];
+  launched?: PlayerOptions['launched'];
   local?: Download;
+  /** A YouTube version's stream. */
+  youTube?: string;
 }
 
 /**
@@ -125,7 +139,7 @@ export function PlayerPage({
   const picks = useShowPicks();
   usePlayerPage();
   const host = currentHost();
-  usePlayerFullscreen(!host.usePlayer || !!host.fullscreen);
+  usePlayerFullscreen(!host.player || !!host.fullscreen);
 
   // Pinned once found: a refreshed version list must not restart playback.
   const [playing, setPlaying] = React.useState<Omit<
@@ -135,6 +149,8 @@ export function PlayerPage({
   const sources = local ? [local.source!] : playableSources(info.data);
   const source = sourceId ? sources.find((s) => s.Id === sourceId) : sources[0];
   const missing = !playing && !!item.data && !!info.data && !source;
+  const youTubeId = playing ? undefined : source?.aiostreams?.ytId;
+  const youTube = useYouTubeStream(youTubeId);
   React.useEffect(() => {
     if (!missing || !item.data) return;
     lastVersions.set(itemId, undefined);
@@ -144,6 +160,7 @@ export function PlayerPage({
     !playing &&
     item.data &&
     source &&
+    (!youTubeId || youTube.data) &&
     !playback.isLoading &&
     !picks.isLoading
   ) {
@@ -155,6 +172,7 @@ export function PlayerPage({
       prefs: withShowPick(playback.prefs, picks.data, item.data),
       launched: player.kind === 'launched' ? player : undefined,
       local,
+      youTube: youTube.data ?? undefined,
     });
   }
 
@@ -164,6 +182,7 @@ export function PlayerPage({
       info.isLoading ||
       playback.isLoading ||
       picks.isLoading ||
+      youTube.isLoading ||
       missing
     ) {
       return (
@@ -172,18 +191,15 @@ export function PlayerPage({
         </Cover>
       );
     }
+    if (youTubeId && !youTube.data)
+      return <Failure itemId={itemId} message="This video didn't load." />;
     return (
       <Failure itemId={itemId} message="This version is no longer available." />
     );
   }
-  const { usePlayer } = currentHost();
   return (
     <VersionPickerProvider>
-      {usePlayer ? (
-        <NativePlayer {...playing} startMs={startMs} usePlayer={usePlayer} />
-      ) : (
-        <BrowserPlayer {...playing} startMs={startMs} />
-      )}
+      <Player {...playing} startMs={startMs} />
     </VersionPickerProvider>
   );
 }
@@ -402,12 +418,14 @@ function cueCss(style: SubtitleStyle): string {
     color: ${css.color};
     background-color: ${css.backgroundColor};
     text-shadow: ${css.textShadow};
+    ${css.fontFamily ? `font-family: ${css.fontFamily};` : ''}
   }`;
 }
 
 /** For a player that draws no subtitles, placed and sized as the page's own video draws cues. */
 function SubtitleText({ text, style }: { text: string; style: SubtitleStyle }) {
-  const { fontWeight, color, backgroundColor, textShadow } = subtitleCss(style);
+  const { fontWeight, fontFamily, color, backgroundColor, textShadow } =
+    subtitleCss(style);
   return (
     <div
       data-ui="player-subtitle"
@@ -419,6 +437,7 @@ function SubtitleText({ text, style }: { text: string; style: SubtitleStyle }) {
         style={{
           fontSize: `calc(${subtitleScale(style)} * 5vh)`,
           fontWeight,
+          fontFamily,
           color,
           backgroundColor,
           textShadow,
@@ -430,108 +449,14 @@ function SubtitleText({ text, style }: { text: string; style: SubtitleStyle }) {
   );
 }
 
-function useKeepAwake(player: PlayerController) {
-  const awake = player.state.started && !player.state.paused;
+function useKeepAwake(player: PlayerController, own: boolean) {
+  const awake = own && player.state.started && !player.state.paused;
   React.useEffect(() => {
     const { keepAwake } = currentHost();
     if (!awake || !keepAwake) return;
     keepAwake(true);
     return () => keepAwake(false);
   }, [awake]);
-}
-
-function BrowserPlayer({
-  item,
-  source,
-  playSessionId,
-  startMs,
-  prefs,
-}: PlayerProps) {
-  const { client } = useSession();
-  const video = React.useRef<HTMLVideoElement>(null);
-  const { back, onEnded, connect } = useEnded(item);
-  const [subtitleStyle] = useSetting(settings.subtitleStyle);
-  const [fit] = useSetting(settings.videoFit);
-  const player = useBrowserPlayer(video, {
-    source,
-    startMs,
-    onEnded,
-    prefs,
-    subtitleStyle,
-  });
-  const segments = useSegments(item.Id!);
-  const next = useNextEpisodePrompt({
-    item,
-    source,
-    player,
-    segments: segments.data?.Items,
-    onBack: back,
-  });
-  connect(next);
-  const switchVersion = useSwitchVersion(item, source, player);
-  const controls = useShowTrackPicks(player, item, source);
-  useReporting(player, { item, source, playSessionId });
-  useNowPlaying(item, player, {
-    onStop: back,
-    onNext: next.next ? next.playNext : undefined,
-    onPrevious: next.previous ? next.playPrevious : undefined,
-  });
-  useKeepAwake(player);
-
-  return (
-    <div data-page="player" className="fixed inset-0 bg-black">
-      <style>{cueCss(subtitleStyle)}</style>
-      <video
-        ref={video}
-        data-ui="video"
-        src={streamUrl(client, item.Id!, source, playSessionId)}
-        className={cn('h-full w-full', OBJECT_FIT[fit])}
-        autoPlay
-        playsInline
-      >
-        {textSubtitles(source).map((s) => {
-          const url = subtitleUrl(client, s);
-          return url ? (
-            <track
-              key={s.Index}
-              kind="subtitles"
-              src={url}
-              srcLang={s.Language ?? undefined}
-              label={s.DisplayTitle ?? s.Title ?? s.Language ?? 'Subtitles'}
-            />
-          ) : null;
-        })}
-      </video>
-      {/* A failed player's controls would only take keys and focus from it. */}
-      {player.state.error ? (
-        <Failure
-          itemId={item.Id!}
-          item={item}
-          source={source}
-          message={player.state.error}
-          onVersions={switchVersion}
-        />
-      ) : (
-        <>
-          {!next.asking && (
-            <PlayerControls
-              item={item}
-              player={controls}
-              segments={segments.data?.Items}
-              onBack={back}
-              offeringNext={!!next.element}
-              onVersions={switchVersion}
-              onPrevious={next.previous ? next.playPrevious : undefined}
-              onNext={next.next ? next.playNext : undefined}
-              onEpisode={next.playEpisode}
-              loadingEpisode={next.loading}
-            />
-          )}
-          {next.element}
-        </>
-      )}
-    </div>
-  );
 }
 
 /**
@@ -546,7 +471,7 @@ function useShownSegments(
 ) {
   const { chapters } = player;
   const { durationMs } = player.state;
-  const [preferChapters] = useSetting(settings.desktop.chapterSkips);
+  const [preferChapters] = useSetting(settings.playback.chapterSkips);
   const episode = item.Type === 'Episode';
   return React.useMemo(() => {
     const named = chapterSegments(chapters ?? [], durationMs);
@@ -564,11 +489,11 @@ function useShownSegments(
 }
 
 /**
- * mpv draws beneath the page, which stays transparent from the first paint;
- * a cover hides the wait for the first frame. A player in its own window
- * keeps the cover behind the controls that drive it.
+ * The host's player beneath the page, which stays transparent from the first
+ * paint, or the page's own video. A cover hides the wait for the first frame;
+ * a player in its own window keeps it behind the controls that drive it.
  */
-function NativePlayer({
+function Player({
   item,
   source,
   playSessionId,
@@ -576,14 +501,33 @@ function NativePlayer({
   prefs,
   launched,
   local,
-  usePlayer,
-}: PlayerProps & {
-  usePlayer: (opts: NativePlayerOptions) => PlayerController;
-}) {
+  youTube,
+}: PlayerProps) {
   const { client } = useSession();
+  const video = React.useRef<HTMLVideoElement>(null);
+  const [hostPlayer] = React.useState(() => currentHost().player);
   const close = React.useRef<() => void>(undefined);
-  const { back, onEnded, connect } = useEnded(item, () => close.current?.());
-  const [subtitleStyle] = useSetting(settings.subtitleStyle);
+  const ended = useEnded(item, () => close.current?.());
+  const { connect } = ended;
+  const playlistItemId = usePartyBinding(item.Id!);
+  // What the party plays opens paused, until the party starts it.
+  const [startPaused] = React.useState(() => !!playlistItemId);
+  const inParty = !!useParty();
+  const playForParty = usePlayForParty();
+  const back = React.useCallback(() => {
+    if (playlistItemId) leavePartyPlayback();
+    ended.back();
+  }, [playlistItemId, ended]);
+  const onEnded = React.useCallback(() => {
+    if (!playlistItemId) return ended.onEnded();
+    const state = party.state();
+    const more = !!state && state.queue.length > state.playingIndex + 1;
+    party.request(
+      more ? { type: 'NextItem', playlistItemId } : { type: 'Stop' }
+    );
+  }, [playlistItemId, ended]);
+  const [subtitleStyle] = useSetting(settings.subtitle.style);
+  const [fit] = useSetting(settings.video.fit);
   const localSubtitle = React.useCallback(
     (stream: MediaStream) => {
       const at = local?.subtitleStreams?.indexOf(stream.Index!) ?? -1;
@@ -591,12 +535,13 @@ function NativePlayer({
     },
     [local]
   );
-  const player = usePlayer({
+  const own = usePlayer(hostPlayer ?? videoEngine(video), {
     client,
     item,
     url: local?.local
       ? local.local.video
-      : streamUrl(client, item.Id!, source, playSessionId),
+      : (youTube ?? directUrl(client, item.Id!, source)),
+    headers: local?.local ? undefined : requiredHeaders(source),
     subtitleUrl: local ? localSubtitle : undefined,
     source,
     startMs,
@@ -611,12 +556,34 @@ function NativePlayer({
     prefs,
     subtitleStyle,
     launched,
+    startPaused,
   });
+  const player = usePartyPlayer(own, playlistItemId);
   close.current = player.close;
   const segments = useShownSegments(
     item,
     useSegments(item.Id!).data?.Items,
     player
+  );
+  const group = React.useMemo(
+    () =>
+      playlistItemId
+        ? {
+            step: (direction: 'next' | 'previous', episode: BaseItemDto) => {
+              const state = party.state();
+              const at =
+                (state?.playingIndex ?? 0) + (direction === 'next' ? 1 : -1);
+              if (state?.queue[at])
+                party.request({
+                  type: direction === 'next' ? 'NextItem' : 'PreviousItem',
+                  playlistItemId,
+                });
+              else void playForParty(episode, null);
+            },
+            play: (episode: BaseItemDto) => void playForParty(episode, null),
+          }
+        : undefined,
+    [playlistItemId, playForParty]
   );
   const next = useNextEpisodePrompt({
     item,
@@ -624,9 +591,24 @@ function NativePlayer({
     player,
     segments,
     onBack: back,
+    group,
   });
   connect(next);
   const switchVersion = useSwitchVersion(item, source, player);
+  const together = () =>
+    openPartySheet(
+      inParty
+        ? {}
+        : {
+            play: {
+              title: fullTitle(item),
+              run: () => {
+                own.setPaused(true);
+                return playForParty(item, source, own.playhead.positionMs);
+              },
+            },
+          }
+    );
   const controls = useShowTrackPicks(player, item, source);
   useReporting(player, { item, source, playSessionId });
   useNowPlaying(item, player, {
@@ -634,12 +616,29 @@ function NativePlayer({
     onNext: next.next ? next.playNext : undefined,
     onPrevious: next.previous ? next.playPrevious : undefined,
   });
+  useKeepAwake(player, !hostPlayer);
 
   if (player.state.pictureInPicture)
     return <div data-page="player" className="fixed inset-0" />;
   return (
-    <div data-page="player" className="fixed inset-0">
-      <Cover item={item} hidden={player.state.started && !launched} />
+    <div
+      data-page="player"
+      className={cn('fixed inset-0', !hostPlayer && 'bg-black')}
+    >
+      {hostPlayer ? (
+        <Cover item={item} hidden={player.state.started && !launched} />
+      ) : (
+        <>
+          <style>{cueCss(subtitleStyle)}</style>
+          <video
+            ref={video}
+            data-ui="video"
+            className={cn('h-full w-full', OBJECT_FIT[fit])}
+            autoPlay
+            playsInline
+          />
+        </>
+      )}
       {player.subtitleText && (
         <SubtitleText text={player.subtitleText} style={subtitleStyle} />
       )}
@@ -682,8 +681,10 @@ function NativePlayer({
               onNext={next.next ? next.playNext : undefined}
               onEpisode={next.playEpisode}
               loadingEpisode={next.loading}
+              onParty={together}
             />
           )}
+          {inParty && <PartyLayer />}
           {next.element}
         </>
       )}

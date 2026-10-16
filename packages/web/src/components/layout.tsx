@@ -8,17 +8,15 @@ import {
 } from '@tanstack/react-router';
 import {
   BiCalendar,
+  BiGroup,
   BiDownload,
   BiCompass,
   BiHeart,
   BiHistory,
   BiHomeAlt2,
   BiLoaderAlt,
-  BiLogOutCircle,
   BiCog,
   BiSearch,
-  BiServer,
-  BiSliderAlt,
   BiTransferAlt,
   BiWifiOff,
   BiX,
@@ -43,15 +41,11 @@ import { HoverCard } from '@aiostreams/ui/hover-card';
 import { Tooltip } from '@aiostreams/ui/tooltip';
 import type { IconType } from 'react-icons';
 import { Sidebar, type SidebarItem } from '@aiostreams/ui/shared/sidebar';
-import {
-  ConfirmationDialog,
-  useConfirmationDialog,
-} from '@aiostreams/ui/shared/confirmation-dialog';
 import { cn } from '@aiostreams/ui/core/styling';
 import { useMediaQuery } from '@aiostreams/ui/hooks/media-query';
 import { useSession } from '../lib/session';
 import { usePickableUsers } from '../lib/queries';
-import { configureUrl, navigate, to } from '../lib/paths';
+import { navigate, to } from '../lib/paths';
 import { currentHost } from '../lib/hosts';
 import { shellHost } from '../lib/hosts/shell';
 import { serverAddress } from '../lib/servers';
@@ -76,6 +70,9 @@ import { HomePage } from '../pages/home';
 import { PageShown } from '../lib/page-shown';
 import { GlideLayers } from './glide-layers';
 import { UpdatePrompt } from './update-prompt';
+import { PartyHost } from './party/party-host';
+import { openPartySheet } from './party/party-sheet';
+import { useParty } from '../lib/party/party';
 
 // Kept mounted under every page, so it skips the layout's render on each route change.
 const KeptHome = React.memo(HomePage);
@@ -240,31 +237,22 @@ function AccountMenu({
 }
 
 /** The avatar at the foot of the sidebar, styled as its other items. */
-function SidebarAccount({ items }: { items: SidebarItem[] }) {
+function SidebarAccount({ you }: { you: SidebarItem }) {
   const { user } = useSession();
   const sidebar = useAppSidebarContext();
   return (
-    <AccountMenu
-      side="right"
-      align="end"
-      sideOffset={8}
-      items={items}
-      trigger={
-        <div>
-          <VerticalMenu
-            collapsed={!sidebar.isBelowBreakpoint}
-            isSidebar
-            itemClass="relative"
-            items={[
-              {
-                id: 'account',
-                name: user.Name ?? 'You',
-                iconType: SidebarAvatar,
-              },
-            ]}
-          />
-        </div>
-      }
+    <VerticalMenu
+      collapsed={!sidebar.isBelowBreakpoint}
+      isSidebar
+      itemClass="relative"
+      items={[
+        {
+          id: 'account',
+          name: user.Name ?? 'You',
+          iconType: SidebarAvatar,
+          onClick: you.onClick,
+        },
+      ]}
     />
   );
 }
@@ -462,8 +450,7 @@ function Unreachable() {
 }
 
 export function WebLayout() {
-  const { client, signOut, switchUser, changeServer } = useSession();
-  const configure = configureUrl(client.base, useServerInfo());
+  const { switchUser } = useSession();
   const users = usePickableUsers();
   const several = (users.data?.length ?? 0) > 1;
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -497,11 +484,11 @@ export function WebLayout() {
       }
     : null;
   const touch = useMediaQuery('(pointer: coarse)');
-  const [touchNavigation] = useSetting(settings.touchNavigation);
-  const [tvNavigation] = useSetting(settings.tvNavigation);
-  const [tvTopBar] = useSetting(settings.tvTopBar);
-  const [railShape] = useSetting(settings.railShape);
-  const [railNames] = useSetting(settings.railNames);
+  const [touchNavigation] = useSetting(settings.interface.touchNavigation);
+  const [tvNavigation] = useSetting(settings.interface.tvNavigation);
+  const [tvTopBar] = useSetting(settings.interface.tvTopBar);
+  const [railShape] = useSetting(settings.interface.railShape);
+  const [railNames] = useSetting(settings.interface.railNames);
   // What wide screens show; narrow ones always have the bar.
   const nav = currentHost().tv
     ? (`tv-${tvNavigation}` as const)
@@ -522,15 +509,13 @@ export function WebLayout() {
     isCurrent: pathname.startsWith('/calendar'),
     onClick: () => navigate(to.calendar()),
   };
-  const confirmSignOut = useConfirmationDialog({
-    title: 'Sign out',
-    description: __STANDALONE__
-      ? 'Sign out of this server?'
-      : 'Sign out of this browser?',
-    actionText: 'Sign out',
-    onConfirm: signOut,
-  });
-
+  const inParty = !!useParty();
+  const together: SidebarItem = {
+    id: 'party',
+    name: inParty ? 'Watch party' : 'Watch together',
+    iconType: BiGroup,
+    onClick: () => openPartySheet(),
+  };
   const items: SidebarItem[] = [
     {
       id: 'home',
@@ -563,6 +548,7 @@ export function WebLayout() {
     },
     calendar,
     activity,
+    together,
     ...(downloads ? [downloads] : []),
   ];
 
@@ -574,44 +560,19 @@ export function WebLayout() {
     onClick: () => navigate(to.settings()),
   };
 
-  const accountItems: SidebarItem[] = [
-    ...(several
-      ? [
-          {
-            id: 'switch-user',
-            name: 'Switch user',
-            iconType: BiTransferAlt,
-            onClick: switchUser,
-          },
-        ]
-      : []),
-    ...(configure
-      ? [
-          {
-            id: 'configure',
-            name: 'Configure',
-            iconType: BiSliderAlt,
-            onClick: () => window.open(configure, '_blank'),
-          },
-        ]
-      : []),
-    ...(changeServer
-      ? [
-          {
-            id: 'change-server',
-            name: 'Change server',
-            iconType: BiServer,
-            onClick: changeServer,
-          },
-        ]
-      : []),
-    {
-      id: 'sign-out',
-      name: 'Sign out',
-      iconType: BiLogOutCircle,
-      onClick: () => confirmSignOut.open(),
-    },
-  ];
+  const switchItem: SidebarItem = {
+    id: 'switch-user',
+    name: 'Switch user',
+    iconType: BiTransferAlt,
+    onClick: switchUser,
+  };
+  const you: SidebarItem = several
+    ? switchItem
+    : {
+        id: 'account',
+        name: 'Account',
+        onClick: () => navigate(to.settings('account')),
+      };
 
   const page = cn(
     'relative pb-[var(--nav-bar)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[var(--top-bar,0px)]',
@@ -641,14 +602,14 @@ export function WebLayout() {
                   <TouchRail
                     items={items}
                     footerItems={[settingsItem]}
-                    accountItems={accountItems}
+                    you={you}
                     named={named}
                   />
                 ) : nav === 'tv-rail' ? (
                   <TvRail
                     items={items}
                     footerItems={[settingsItem]}
-                    accountItems={accountItems}
+                    you={you}
                     open={named}
                   />
                 ) : (
@@ -657,7 +618,7 @@ export function WebLayout() {
                     items={items}
                     belowItems={<HistoryButtons />}
                     footerItems={[settingsItem]}
-                    footer={<SidebarAccount items={accountItems} />}
+                    footer={<SidebarAccount you={you} />}
                   />
                 )}
               </AppLayoutSidebar>
@@ -667,7 +628,7 @@ export function WebLayout() {
                 <TouchRail
                   items={items}
                   footerItems={[settingsItem]}
-                  accountItems={accountItems}
+                  you={you}
                   named={named}
                   floating
                 />
@@ -675,7 +636,7 @@ export function WebLayout() {
                 <TvRail
                   items={items}
                   footerItems={[settingsItem]}
-                  accountItems={accountItems}
+                  you={you}
                   open={named}
                   floating
                 />
@@ -707,16 +668,17 @@ export function WebLayout() {
                   <CornerMenu
                     items={items}
                     footerItems={[settingsItem]}
-                    accountItems={accountItems}
+                    you={you}
                     tv={nav === 'tv-rail'}
                   />
                 )}
                 {nav === 'tv-top' && (
                   <TvTabs
                     style={tvTopBar}
-                    items={items}
-                    footerItems={[settingsItem]}
-                    accountItems={accountItems}
+                    // A row of named tabs fills up; this one sits with the icons at its end.
+                    items={items.filter((i) => i !== together)}
+                    footerItems={[together, settingsItem]}
+                    you={you}
                   />
                 )}
                 <VersionPickerProvider>
@@ -760,18 +722,27 @@ export function WebLayout() {
           {!currentHost().tv && (
             <MobileNav
               items={items.filter(
-                (i) => i !== calendar && i !== activity && i !== downloads
+                (i) =>
+                  i !== calendar &&
+                  i !== activity &&
+                  i !== downloads &&
+                  i !== together
               )}
-              places={[...(downloads ? [downloads] : []), activity, calendar]}
-              menuItems={[settingsItem, ...accountItems]}
+              places={[
+                ...(downloads ? [downloads] : []),
+                activity,
+                calendar,
+                together,
+              ]}
+              menuItems={several ? [settingsItem, switchItem] : [settingsItem]}
               wide={nav === 'bar'}
             />
           )}
           <ConnectionNote />
-          <ConfirmationDialog {...confirmSignOut} />
         </AppSidebarProvider>
       </div>
       {playing && <Outlet />}
+      <PartyHost />
     </>
   );
 }
@@ -855,13 +826,13 @@ function MobileNav({
 function TouchRail({
   items,
   footerItems,
-  accountItems,
+  you,
   named,
   floating = false,
 }: {
   items: SidebarItem[];
   footerItems: SidebarItem[];
-  accountItems: SidebarItem[];
+  you: SidebarItem;
   named: boolean;
   floating?: boolean;
 }) {
@@ -884,21 +855,14 @@ function TouchRail({
     );
   };
   const account = (
-    <AccountMenu
-      side="right"
-      align="end"
-      sideOffset={8}
-      items={accountItems}
-      trigger={
-        <NavTab
-          data-ui="rail-item"
-          aria-label="Account"
-          item={{ id: 'account', name: 'You' }}
-          icon={<YouIcon />}
-          named={named}
-          className={tab}
-        />
-      }
+    <NavTab
+      data-ui="rail-item"
+      aria-label={you.name}
+      item={{ id: 'account', name: 'You' }}
+      icon={<YouIcon />}
+      named={named}
+      onClick={select(you)}
+      className={tab}
     />
   );
   if (floating) {
@@ -990,13 +954,13 @@ function NavEntry({
 function TvRail({
   items,
   footerItems,
-  accountItems,
+  you,
   open,
   floating = false,
 }: {
   items: SidebarItem[];
   footerItems: SidebarItem[];
-  accountItems: SidebarItem[];
+  you: SidebarItem;
   /** Always shows the names. */
   open: boolean;
   floating?: boolean;
@@ -1021,20 +985,13 @@ function TvRail({
     );
   };
   const account = (
-    <AccountMenu
-      side="right"
-      align="end"
-      sideOffset={8}
-      items={accountItems}
-      trigger={
-        <NavEntry
-          aria-label="Account"
-          item={{ id: 'account', name: 'You' }}
-          icon={<YouIcon />}
-          labelClassName={label}
-          className={cn('w-full', reach)}
-        />
-      }
+    <NavEntry
+      aria-label={you.name}
+      item={{ id: 'account', name: 'You' }}
+      icon={<YouIcon />}
+      onClick={select(you)}
+      labelClassName={label}
+      className={cn('w-full', reach)}
     />
   );
   const shade = !open && (
@@ -1143,12 +1100,12 @@ const CORNER_SHUT = 62;
 function CornerMenu({
   items,
   footerItems,
-  accountItems,
+  you,
   tv,
 }: {
   items: SidebarItem[];
   footerItems: SidebarItem[];
-  accountItems: SidebarItem[];
+  you: SidebarItem;
   tv: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -1236,21 +1193,14 @@ function CornerMenu({
           {items.map(entry)}
           <div className="mx-3 my-1 h-px flex-none bg-white/10" />
           {footerItems.map(entry)}
-          <AccountMenu
-            side="right"
-            align="start"
-            sideOffset={8}
-            items={accountItems}
-            trigger={
-              <NavEntry
-                aria-label="Account"
-                item={{ id: 'account', name: 'You' }}
-                icon={<YouIcon />}
-                labelClassName={label}
-                inert={!open}
-                className="w-full pl-3 pr-5"
-              />
-            }
+          <NavEntry
+            aria-label={you.name}
+            item={{ id: 'account', name: 'You' }}
+            icon={<YouIcon />}
+            onClick={select(you)}
+            labelClassName={label}
+            inert={!open}
+            className="w-full pl-3 pr-5"
           />
         </div>
       </BarSurface>
@@ -1273,12 +1223,12 @@ function TvTabs({
   style,
   items,
   footerItems,
-  accountItems,
+  you,
 }: {
   style: TvTopBar;
   items: SidebarItem[];
   footerItems: SidebarItem[];
-  accountItems: SidebarItem[];
+  you: SidebarItem;
 }) {
   const tab = (item: SidebarItem) => {
     const Icon = item.iconType;
@@ -1309,19 +1259,12 @@ function TvTabs({
           />
         );
       })}
-      <AccountMenu
-        side="bottom"
-        align="end"
-        sideOffset={8}
-        items={accountItems}
-        trigger={
-          <NavEntry
-            aria-label="Account"
-            item={{ id: 'account', name: 'You' }}
-            icon={<YouIcon />}
-            labelClassName="hidden"
-          />
-        }
+      <NavEntry
+        aria-label={you.name}
+        item={{ id: 'account', name: 'You' }}
+        icon={<YouIcon />}
+        onClick={select(you)}
+        labelClassName="hidden"
       />
     </>
   );
