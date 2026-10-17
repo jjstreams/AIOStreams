@@ -36,6 +36,7 @@ router.get(
             signal,
             clientIp: req.requestIp || req.ip || req.socket.remoteAddress,
             userAgent: req.headers['user-agent'],
+            downstream: res,
           }),
         disposition: download ? 'attachment' : 'inline',
       });
