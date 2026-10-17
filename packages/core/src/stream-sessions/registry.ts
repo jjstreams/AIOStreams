@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import {
   StreamSessionRepository,
   type StreamBandwidthDelta,
@@ -65,6 +65,23 @@ const STUCK_READ_MS = 6 * 60 * 60_000;
  */
 const IDLE_REFRESH_MS = 60_000;
 
+/**
+ * Silence on an open read after which it counts as stalled. A player that
+ * pauses by closing its request holds no read, so it never stalls.
+ */
+export const STALL_THRESHOLD_MS = 5_000;
+
+type StallCause = 'startup' | 'downstream' | 'upstream' | 'unknown';
+
+interface Stall {
+  /** When bytes stopped, not when the stall was noticed. */
+  since: number;
+  /** The newest read had not served a byte yet. */
+  startup: boolean;
+  /** Upstream bytes arrived during the stall without reaching the client. */
+  upstreamSeen: boolean;
+}
+
 /** Raised on a reader whose session was force-stopped. */
 export class StreamStoppedError extends Error {
   readonly code = 'STREAM_STOPPED';
@@ -79,6 +96,9 @@ interface LiveRead {
   bytes: number;
   stream?: Readable;
   kill?: () => void;
+  /** Writes to the client are observed, so silence can be told apart. */
+  tracked?: boolean;
+  backpressured?: boolean;
 }
 
 interface Session {
@@ -104,6 +124,22 @@ interface Session {
   /** Bytes seen since the rate last advanced. */
   unratedBytes: number;
   lastChunkAt: number;
+  upstreamBytes: number;
+  /** When upstream bytes last arrived; 0 before the first. */
+  upstreamBytesAt: number;
+  emaUpstreamBytesPerSec: number;
+  unratedUpstreamBytes: number;
+  lastUpstreamChunkAt: number;
+  backpressuredReads: number;
+  backpressureSince?: number;
+  backpressureEndedAt: number;
+  backpressureMs: number;
+  /** Last served byte or newest read opening, whichever came later. */
+  quietSince: number;
+  stalls: number;
+  /** Duration of finished stalls. */
+  stalledMs: number;
+  stall?: Stall;
   /** Needs writing on the next flush. */
   dirty: boolean;
   ended?: { at: number; reason: StreamEndReason };
@@ -211,6 +247,17 @@ export class StreamRegistry {
       emaBytesPerSec: 0,
       unratedBytes: 0,
       lastChunkAt: now,
+      upstreamBytes: 0,
+      upstreamBytesAt: 0,
+      emaUpstreamBytesPerSec: 0,
+      unratedUpstreamBytes: 0,
+      lastUpstreamChunkAt: now,
+      backpressuredReads: 0,
+      backpressureEndedAt: 0,
+      backpressureMs: 0,
+      quietSince: now,
+      stalls: 0,
+      stalledMs: 0,
       dirty: true,
     };
     this.byKey.set(key, session);
@@ -271,6 +318,7 @@ export class StreamRegistry {
       start: Math.max(0, input.start ?? 0),
       bytes: 0,
     };
+    this.catchStall(session, now);
     session.reads.set(read.id, read);
     session.newestReadId = read.id;
     session.requests++;
@@ -280,6 +328,11 @@ export class StreamRegistry {
       session.lastChunkAt = now;
       session.unratedBytes = 0;
     }
+    if (now - session.lastUpstreamChunkAt > ACTIVITY_WINDOW_MS) {
+      session.lastUpstreamChunkAt = now;
+      session.unratedUpstreamBytes = 0;
+    }
+    session.quietSince = now;
     session.lastSeenAt = now;
     session.dirty = true;
     if (input.size && !session.size) session.size = input.size;
@@ -303,11 +356,12 @@ export class StreamRegistry {
       'playback read started'
     );
     let closed = false;
-    return {
+    const handle: StreamHandle = {
       sessionId: session.id,
       addBytes: (bytes: number) => {
         if (bytes <= 0) return;
         const at = Date.now();
+        this.catchStall(session, at);
         const dtMs = at - session.lastChunkAt;
         session.bytesServed += bytes;
         session.pendingBytes += bytes;
@@ -323,6 +377,44 @@ export class StreamRegistry {
           session.unratedBytes = 0;
           session.lastChunkAt = at;
         }
+        session.quietSince = at;
+        if (session.stall) this.endStall(session, 'resumed', at);
+      },
+      addUpstreamBytes: (bytes: number) => {
+        if (bytes <= 0) return;
+        const at = Date.now();
+        this.catchStall(session, at);
+        const dtMs = at - session.lastUpstreamChunkAt;
+        session.upstreamBytes += bytes;
+        session.upstreamBytesAt = at;
+        session.unratedUpstreamBytes += bytes;
+        if (dtMs > 0) {
+          const w = Math.exp(-dtMs / RATE_TAU_MS);
+          session.emaUpstreamBytesPerSec =
+            session.emaUpstreamBytesPerSec * w +
+            (session.unratedUpstreamBytes / dtMs) * 1000 * (1 - w);
+          session.unratedUpstreamBytes = 0;
+          session.lastUpstreamChunkAt = at;
+        }
+      },
+      trackDownstream: (writable: Writable) => {
+        read.tracked = true;
+        const write = writable.write;
+        writable.write = ((chunk: unknown, ...rest: unknown[]) => {
+          const ok = write.apply(writable, [chunk, ...rest] as never);
+          handle.addBytes(
+            typeof chunk === 'string'
+              ? Buffer.byteLength(chunk)
+              : ((chunk as ArrayBufferView | null)?.byteLength ?? 0)
+          );
+          if (!ok && !closed) {
+            this.setBackpressure(session, read, true, Date.now());
+          }
+          return ok;
+        }) as Writable['write'];
+        writable.on('drain', () =>
+          this.setBackpressure(session, read, false, Date.now())
+        );
       },
       setInfo: (info) => {
         if (info.size && info.size > 0) session.size = info.size;
@@ -354,8 +446,120 @@ export class StreamRegistry {
         session.reads.delete(read.id);
         session.lastSeenAt = Date.now();
         session.dirty = true;
+        this.setBackpressure(session, read, false, session.lastSeenAt);
+        if (session.reads.size === 0) {
+          this.endStall(session, 'closed', session.lastSeenAt);
+        }
       },
     };
+    return handle;
+  }
+
+  private setBackpressure(
+    session: Session,
+    read: LiveRead,
+    on: boolean,
+    at: number
+  ): void {
+    if (Boolean(read.backpressured) === on) return;
+    read.backpressured = on;
+    if (on) {
+      if (session.backpressuredReads++ === 0) session.backpressureSince = at;
+      return;
+    }
+    if (--session.backpressuredReads > 0) return;
+    session.backpressureMs += at - (session.backpressureSince ?? at);
+    session.backpressureSince = undefined;
+    session.backpressureEndedAt = at;
+  }
+
+  /**
+   * Start the stall an open read has gone quiet into. Called on every tick and
+   * before new bytes are counted, so one shorter than the tick interval is
+   * still caught when it ends.
+   */
+  private catchStall(session: Session, now: number): void {
+    const newest = this.stallingRead(session, now);
+    if (!newest) return;
+    session.stall = {
+      since: session.quietSince,
+      startup: !newest.bytes,
+      upstreamSeen: session.upstreamBytesAt > session.quietSince,
+    };
+    session.stalls++;
+    this.logStall('playback_stall_started', session, session.stall);
+  }
+
+  /**
+   * The newest open read, once it has gone quiet long enough to stall. Only a
+   * read whose client writes are observed qualifies: without them a reader
+   * that stopped pulling looks exactly like a silent source.
+   */
+  private stallingRead(session: Session, now: number): LiveRead | undefined {
+    if (session.stall || now - session.quietSince < STALL_THRESHOLD_MS) {
+      return undefined;
+    }
+    let newest: LiveRead | undefined;
+    for (const read of session.reads.values()) newest = read;
+    return newest?.tracked ? newest : undefined;
+  }
+
+  private stallCause(session: Session, stall: Stall): StallCause {
+    if (stall.startup) return 'startup';
+    if (
+      session.backpressuredReads > 0 ||
+      session.backpressureEndedAt >= stall.since
+    ) {
+      return 'downstream';
+    }
+    return stall.upstreamSeen ? 'unknown' : 'upstream';
+  }
+
+  private endStall(
+    session: Session,
+    outcome: 'resumed' | 'closed',
+    now: number
+  ): void {
+    const stall = session.stall;
+    if (!stall) return;
+    session.stall = undefined;
+    const duration = Math.max(0, now - stall.since);
+    session.stalledMs += duration;
+    this.logStall('playback_stall_ended', session, stall, {
+      stall_duration_ms: duration,
+      stall_outcome: outcome,
+    });
+  }
+
+  private logStall(
+    event: 'playback_stall_started' | 'playback_stall_ended',
+    session: Session,
+    stall: Stall,
+    extra: Record<string, unknown> = {}
+  ): void {
+    logger.info(
+      {
+        event,
+        session_id: session.id,
+        instance_id: this.instanceId,
+        transport: session.transport,
+        username: session.username,
+        stall_cause: this.stallCause(session, stall),
+        upstream_bytes: session.upstreamBytes,
+        bytes_served: session.bytesServed,
+        ...extra,
+      },
+      event.replaceAll('_', ' ')
+    );
+  }
+
+  /** Start stalls on quiet reads and refine the cause of running ones. */
+  checkStalls(now = Date.now()): void {
+    for (const session of this.byKey.values()) {
+      const stall = session.stall;
+      if (!stall) this.catchStall(session, now);
+      else if (session.upstreamBytesAt > stall.since) stall.upstreamSeen = true;
+    }
   }
 
   /** Tear down a session's reads and move it to history. */
@@ -367,6 +571,7 @@ export class StreamRegistry {
     if (session.ended) return;
     session.ended = { at: now, reason };
     session.dirty = true;
+    this.endStall(session, 'closed', now);
     for (const read of session.reads.values()) {
       try {
         read.kill?.();
@@ -436,6 +641,11 @@ export class StreamRegistry {
           : s.reads.size > 0
             ? 'paused'
             : 'idle';
+      const upstreamIdle = Math.max(0, now - s.lastUpstreamChunkAt);
+      // A stall the next tick will start is reported already.
+      const pendingStall = this.stallingRead(s, now) !== undefined;
+      const stallSince =
+        s.stall?.since ?? (pendingStall ? s.quietSince : undefined);
       out.push({
         id: s.id,
         transport: s.transport,
@@ -459,6 +669,21 @@ export class StreamRegistry {
           activity === 'streaming'
             ? Math.round(s.emaBytesPerSec * Math.exp(-idle / RATE_TAU_MS))
             : 0,
+        upstreamBytes: s.upstreamBytes,
+        upstreamBytesPerSec:
+          upstreamIdle < ACTIVITY_WINDOW_MS
+            ? Math.round(
+                s.emaUpstreamBytesPerSec * Math.exp(-upstreamIdle / RATE_TAU_MS)
+              )
+            : 0,
+        backpressured: s.backpressuredReads > 0,
+        backpressureMs:
+          s.backpressureMs +
+          (s.backpressureSince === undefined ? 0 : now - s.backpressureSince),
+        stalls: s.stalls + (pendingStall ? 1 : 0),
+        stalledMs:
+          s.stalledMs +
+          (stallSince === undefined ? 0 : Math.max(0, now - stallSince)),
         instanceId: this.instanceId,
       });
     }
@@ -498,6 +723,7 @@ export class StreamRegistry {
    */
   async flush(now = Date.now()): Promise<{ written: number; ended: number }> {
     const ended = this.sweep(now);
+    this.checkStalls(now);
 
     const upserts: StreamSessionUpsert[] = [];
     const bandwidth = new Map<string, StreamBandwidthDelta>();

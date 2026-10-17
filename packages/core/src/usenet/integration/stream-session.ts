@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream';
+import { Readable, type Writable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { createLogger } from '../../logging/logger.js';
 import { DebridError } from '../../debrid/base.js';
@@ -690,6 +690,8 @@ export interface OpenUsenetStreamOptions {
   clientIp?: string;
   /** The playback request's User-Agent, for session attribution. */
   userAgent?: string;
+  /** Client response; served bytes are counted as they are written to it. */
+  downstream?: Writable;
   /** Opened through the share tree (FUSE/NFS/WebDAV): no connection caps. */
   share?: boolean;
 }
@@ -793,6 +795,7 @@ export async function openUsenetStream(
     });
   }
   const handle = admitted.handle;
+  if (opts.downstream) handle.trackDownstream(opts.downstream);
 
   noteStreamActivity(decoded.hash);
   let session: UsenetStreamSession;
@@ -828,7 +831,10 @@ export async function openUsenetStream(
   const push = stream.push.bind(stream);
   stream.push = (chunk: unknown, encoding?: BufferEncoding): boolean => {
     const length = (chunk as { length?: number } | null)?.length;
-    if (typeof length === 'number' && length > 0) handle.addBytes(length);
+    if (typeof length === 'number' && length > 0) {
+      handle.addUpstreamBytes(length);
+      if (!opts.downstream) handle.addBytes(length);
+    }
     return push(chunk as never, encoding);
   };
   handle.attach(stream);

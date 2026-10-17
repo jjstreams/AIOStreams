@@ -418,6 +418,7 @@ router.all(
           upstreamResponse?.body?.destroy();
           if (!req.socket.destroyed) req.socket.resetAndDestroy();
         });
+        session.handle.trackDownstream(res);
       }
 
       const upstreamStartTime = Date.now();
@@ -599,7 +600,7 @@ router.all(
           const counter = new Transform({
             transform(chunk, _enc, cb) {
               playbackBytes += chunk.length;
-              handle.addBytes(chunk.length);
+              handle.addUpstreamBytes(chunk.length);
               cb(null, chunk);
             },
           });
