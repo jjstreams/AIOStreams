@@ -35,6 +35,8 @@ export interface StreamOpenInput {
    */
   share?: boolean;
   clientIp?: string;
+  /** The playback request's User-Agent. Held in memory only, never persisted. */
+  userAgent?: string;
   /** Stable identity of what is being streamed; also the block/ban subject. */
   targetKey: string;
   filename?: string;
@@ -80,6 +82,8 @@ export interface LiveStreamSession {
   transport: StreamTransport;
   username: string;
   clientIp?: string;
+  /** Only known to the replica serving the session. */
+  userAgent?: string;
   targetKey: string;
   filename?: string;
   displayUrl?: string;

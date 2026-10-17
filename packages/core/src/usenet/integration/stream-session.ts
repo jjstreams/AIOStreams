@@ -688,6 +688,8 @@ export interface OpenUsenetStreamOptions {
   signal?: AbortSignal;
   /** Client address, for stream accounting. */
   clientIp?: string;
+  /** The playback request's User-Agent, for session attribution. */
+  userAgent?: string;
   /** Opened through the share tree (FUSE/NFS/WebDAV): no connection caps. */
   share?: boolean;
 }
@@ -752,6 +754,7 @@ export async function openUsenetStream(
     username: decoded.owner ?? '',
     share: opts.share,
     clientIp: opts.clientIp,
+    userAgent: opts.userAgent,
     targetKey: usenetTargetKey(
       decoded.hash,
       decoded.fileIndex,
