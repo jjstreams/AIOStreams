@@ -1,4 +1,5 @@
 import type { Readable, Writable } from 'node:stream';
+import type { StreamSource } from './source.js';
 import type {
   StreamEndReason,
   StreamTransport,
@@ -37,6 +38,9 @@ export interface StreamOpenInput {
   clientIp?: string;
   /** The playback request's User-Agent. Held in memory only, never persisted. */
   userAgent?: string;
+  /** Addon preset type and service id behind the stream, when known. */
+  sourceAddon?: string;
+  sourceService?: string;
   /** Stable identity of what is being streamed; also the block/ban subject. */
   targetKey: string;
   filename?: string;
@@ -63,6 +67,8 @@ export interface StreamHandle {
    * backpressure. Callers using this stop calling {@link addBytes}.
    */
   trackDownstream(writable: Writable): void;
+  /** Replace the source once a redirect shows which stream really plays. */
+  setSource(source: StreamSource): void;
   /** Fill in details only known after the upstream responded. */
   setInfo(info: { size?: number; filename?: string; start?: number }): void;
   /** Register a readable to destroy when the session is killed. */
@@ -91,6 +97,8 @@ export interface LiveStreamSession {
   clientIp?: string;
   /** Only known to the replica serving the session. */
   userAgent?: string;
+  sourceAddon?: string;
+  sourceService?: string;
   targetKey: string;
   filename?: string;
   displayUrl?: string;

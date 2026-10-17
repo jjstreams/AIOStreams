@@ -42,7 +42,7 @@ import {
   markReleaseDeadForCode,
 } from '../../release-blocklist/feedback.js';
 import { nzbContentKey } from '../../release-blocklist/keys.js';
-import { appConfig } from '../../utils/index.js';
+import { appConfig, constants } from '../../utils/index.js';
 import {
   streamRegistry,
   usenetTargetKey,
@@ -757,6 +757,8 @@ export async function openUsenetStream(
     share: opts.share,
     clientIp: opts.clientIp,
     userAgent: opts.userAgent,
+    sourceAddon: decoded.sourceAddon,
+    sourceService: constants.AIOSTREAMS_SERVICE,
     targetKey: usenetTargetKey(
       decoded.hash,
       decoded.fileIndex,

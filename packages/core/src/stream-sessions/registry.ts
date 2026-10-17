@@ -17,6 +17,7 @@ import {
 import { checkAdmission } from './limits.js';
 import { recordedClientIp } from './client-ip.js';
 import { instanceId } from './instance-id.js';
+import { sourceSlug } from './source.js';
 import type {
   LiveStreamSession,
   StreamEndReason,
@@ -107,6 +108,8 @@ interface Session {
   username: string;
   clientIp?: string;
   userAgent?: string;
+  sourceAddon?: string;
+  sourceService?: string;
   targetKey: string;
   filename?: string;
   displayUrl?: string;
@@ -233,6 +236,8 @@ export class StreamRegistry {
       username: input.username,
       clientIp: input.clientIp,
       userAgent: boundedUserAgent(input.userAgent),
+      sourceAddon: sourceSlug(input.sourceAddon),
+      sourceService: sourceSlug(input.sourceService),
       targetKey: input.targetKey,
       filename: input.filename,
       displayUrl: input.displayUrl,
@@ -339,6 +344,8 @@ export class StreamRegistry {
     if (input.filename && !session.filename) session.filename = input.filename;
     if (!session.userAgent)
       session.userAgent = boundedUserAgent(input.userAgent);
+    session.sourceAddon ??= sourceSlug(input.sourceAddon);
+    session.sourceService ??= sourceSlug(input.sourceService);
     if (input.displayUrl && !session.displayUrl) {
       session.displayUrl = input.displayUrl;
     }
@@ -415,6 +422,10 @@ export class StreamRegistry {
         writable.on('drain', () =>
           this.setBackpressure(session, read, false, Date.now())
         );
+      },
+      setSource: (source) => {
+        session.sourceAddon = sourceSlug(source.addon);
+        session.sourceService = sourceSlug(source.service);
       },
       setInfo: (info) => {
         if (info.size && info.size > 0) session.size = info.size;
@@ -547,6 +558,8 @@ export class StreamRegistry {
         stall_cause: this.stallCause(session, stall),
         upstream_bytes: session.upstreamBytes,
         bytes_served: session.bytesServed,
+        source_addon: session.sourceAddon,
+        source_service: session.sourceService,
         ...extra,
       },
       event.replaceAll('_', ' ')
@@ -652,6 +665,8 @@ export class StreamRegistry {
         username: s.username,
         clientIp: recordedClientIp(s.clientIp),
         userAgent: s.userAgent,
+        sourceAddon: s.sourceAddon,
+        sourceService: s.sourceService,
         targetKey: s.targetKey,
         filename: s.filename,
         displayUrl: s.displayUrl,

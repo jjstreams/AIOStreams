@@ -26,6 +26,8 @@ import {
   PLAYBACK_PATH_PREFIX,
   withPlayPath,
   onProxiedPlay,
+  STREAM_SOURCE_HEADER,
+  parseStreamSource,
 } from '@aiostreams/core';
 import { z } from 'zod';
 import { request, Dispatcher } from 'undici';
@@ -95,6 +97,21 @@ function totalFromContentRange(header: string | string[] | undefined): number {
   const value = Array.isArray(header) ? header[0] : header;
   const match = /\/(\d+)\s*$/.exec(value ?? '');
   return match ? Number(match[1]) : 0;
+}
+
+/** Our own playback route, the only upstream trusted to name a source. */
+function isOwnPlaybackUrl(url: string): boolean {
+  try {
+    const { host, pathname } = new URL(url);
+    return (
+      pathname.includes(PLAYBACK_PATH_PREFIX) &&
+      [appConfig.bootstrap.baseUrl, appConfig.bootstrap.internalUrl].some(
+        (own) => new URL(own).host === host
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 
 function copyHeaders(headers: Record<string, string | string[] | undefined>) {
@@ -388,6 +405,8 @@ router.all(
           username: auth.username,
           clientIp,
           userAgent: req.headers['user-agent'],
+          sourceAddon: encrypted ? data.source?.addon : undefined,
+          sourceService: encrypted ? data.source?.service : undefined,
           targetKey: proxyTargetKey(data.url),
           filename,
           displayUrl: makeUrlLogSafe(data.url),
@@ -481,6 +500,14 @@ router.all(
           bodyTimeout: 0,
           headersTimeout: 0,
         });
+
+        // Failover may have played another stream than the one listed.
+        const source = parseStreamSource(
+          upstreamResponse.headers[STREAM_SOURCE_HEADER]
+        );
+        if (source && session?.ok && isOwnPlaybackUrl(currentUrl)) {
+          session.handle.setSource(source);
+        }
 
         const hop = getRedirectHop(
           upstreamResponse.statusCode,
