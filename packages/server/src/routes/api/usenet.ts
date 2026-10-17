@@ -35,6 +35,7 @@ router.get(
             suffixLength: range?.suffixLength,
             signal,
             clientIp: req.requestIp || req.ip || req.socket.remoteAddress,
+            userAgent: req.headers['user-agent'],
           }),
         disposition: download ? 'attachment' : 'inline',
       });

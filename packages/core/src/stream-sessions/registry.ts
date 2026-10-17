@@ -86,6 +86,7 @@ interface Session {
   transport: StreamTransport;
   username: string;
   clientIp?: string;
+  userAgent?: string;
   targetKey: string;
   filename?: string;
   displayUrl?: string;
@@ -119,6 +120,19 @@ function identityKey(
   targetKey: string
 ): string {
   return JSON.stringify([username, clientIp ?? '', targetKey]);
+}
+
+const USER_AGENT_MAX_LENGTH = 256;
+
+/** Client-controlled, so bounded and stripped of control characters. */
+export function boundedUserAgent(
+  value: string | undefined
+): string | undefined {
+  const cleaned = value
+    ?.replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+    .slice(0, USER_AGENT_MAX_LENGTH);
+  return cleaned || undefined;
 }
 
 function idleTimeoutMs(): number {
@@ -182,6 +196,7 @@ export class StreamRegistry {
       transport: input.transport,
       username: input.username,
       clientIp: input.clientIp,
+      userAgent: boundedUserAgent(input.userAgent),
       targetKey: input.targetKey,
       filename: input.filename,
       displayUrl: input.displayUrl,
@@ -269,6 +284,8 @@ export class StreamRegistry {
     session.dirty = true;
     if (input.size && !session.size) session.size = input.size;
     if (input.filename && !session.filename) session.filename = input.filename;
+    if (!session.userAgent)
+      session.userAgent = boundedUserAgent(input.userAgent);
     if (input.displayUrl && !session.displayUrl) {
       session.displayUrl = input.displayUrl;
     }
@@ -424,6 +441,7 @@ export class StreamRegistry {
         transport: s.transport,
         username: s.username,
         clientIp: recordedClientIp(s.clientIp),
+        userAgent: s.userAgent,
         targetKey: s.targetKey,
         filename: s.filename,
         displayUrl: s.displayUrl,

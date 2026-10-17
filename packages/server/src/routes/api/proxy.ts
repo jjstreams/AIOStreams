@@ -387,6 +387,7 @@ router.all(
           transport: 'proxy',
           username: auth.username,
           clientIp,
+          userAgent: req.headers['user-agent'],
           targetKey: proxyTargetKey(data.url),
           filename,
           displayUrl: makeUrlLogSafe(data.url),
