@@ -154,6 +154,15 @@ function exoStatsText(
   const buffered = num('bufferedMs');
   if (buffered !== undefined)
     lines.push(`Buffered   ${(buffered / 1000).toFixed(1)} s`);
+  const ahead = num('cacheAhead');
+  if (ahead !== undefined) {
+    const aheadMs = num('cacheAheadMs');
+    const speed = num('linkSpeed') ?? 0;
+    const ratio = num('linkRatio');
+    lines.push(
+      `Cache      ${aheadMs !== undefined ? `${Math.round(aheadMs / 1000)} s` : formatBytes(ahead)} ahead · ${formatBytes(num('cacheBytes'))} of ${formatBytes(num('cacheBudget'))}${speed > 0 ? ` · link ${formatBytes(speed)}/s${ratio ? ` (${ratio.toFixed(1)}× the file)` : ''}` : ''}`
+    );
+  }
   const shown = num('renderedFrames');
   if (shown !== undefined)
     lines.push(
@@ -425,7 +434,7 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
       );
     },
     setPaused: (paused) => send('player-set', { paused }),
-    seek: (positionMs) => send('player-seek', { positionMs }),
+    seek: (positionMs, snapMs) => send('player-seek', { positionMs, snapMs }),
     setVolume: (volume, muted) => send('player-set', { volume, muted }),
     setRate: (speed) => send('player-set', { speed }),
     setAudio: (audio) => send('player-set', { audio }),
@@ -443,6 +452,9 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
     },
     setSubtitleDelay: (subtitleDelayMs) =>
       send('player-set', { subtitleDelayMs }),
+    skipAhead: external
+      ? undefined
+      : (skips) => send('player-skips', { segments: skips }),
     // The user's own player keeps its own look.
     setStyle({ subtitleStyle, fit, lift }) {
       if (external || !subtitleStyle) return;
@@ -571,6 +583,7 @@ export function playerSettings() {
       ? {
           frameRate: video.frameRate.read(),
           tunneling: video.tunneling.read(),
+          cacheMb: Number(settings.player.cacheSize.read()) || 0,
         }
       : { audioDevice: audio.device.read() }),
   };

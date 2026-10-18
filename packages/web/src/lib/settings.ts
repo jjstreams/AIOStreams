@@ -69,6 +69,21 @@ export function onSettingsChange(listener: () => void): () => void {
   return subscribe(listener);
 }
 
+/** Every setting's value by its path in `settings`, this device's and the user's, for a report. */
+export function settingsSnapshot(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const walk = (node: object, path: string) => {
+    for (const [key, value] of Object.entries(node)) {
+      if (!value || typeof value !== 'object') continue;
+      if ('read' in value && typeof value.read === 'function')
+        out[path + key] = (value as Setting<unknown>).read();
+      else walk(value, `${path}${key}.`);
+    }
+  };
+  walk(settings, '');
+  return out;
+}
+
 /** An older key of a setting, with a reader where the value's shape changed. */
 type Was<T> = string | { key: string; read: (old: unknown) => T | undefined };
 
@@ -195,6 +210,11 @@ export function syncPreferences(
       publish({});
     }
   };
+}
+
+/** Whether a user's settings apply, rather than the defaults of nobody signed in. */
+export function signedIn(): boolean {
+  return session !== null;
 }
 
 let pushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -463,6 +483,9 @@ export type AudioChannels = (typeof AUDIO_CHANNELS)[number];
 /** What plays versions inside the Android app. */
 export const PLAYER_ENGINES = ['auto', 'mpv', 'exoplayer'] as const;
 export type PlayerEngine = (typeof PLAYER_ENGINES)[number];
+/** Megabytes, or `auto` to size it from the device's memory. */
+export const CACHE_SIZES = ['auto', '128', '256', '512', '1000'] as const;
+export type CacheSize = (typeof CACHE_SIZES)[number];
 
 /** `auto` asks the output what it decodes, which only the Android app can. */
 export const PASSTHROUGH = ['off', 'auto', 'always'] as const;
@@ -593,7 +616,12 @@ const discord = record(DISCORD_EVENTS, (event) =>
 export const settings = {
   interface: {
     /** A catalog's locale, or `auto` for the system's language. */
-    language: device<string>('aiostreams-web-interface-language', 'auto'),
+    language: synced<string>(
+      'language',
+      (raw) => raw ?? 'auto',
+      (value) => (value === 'auto' ? undefined : value),
+      ['aiostreams-web-interface-language']
+    ),
     featured: synced<Featured>(
       'featured',
       parseFeatured,
@@ -780,6 +808,11 @@ export const settings = {
       'auto',
       PLAYER_ENGINES,
       ['aiostreams-android-engine']
+    ),
+    cacheSize: device<CacheSize>(
+      'aiostreams-web-player-cache-size',
+      'auto',
+      CACHE_SIZES
     ),
   },
   video: {
