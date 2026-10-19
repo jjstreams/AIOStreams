@@ -30,6 +30,7 @@ import type {
   ItemImages,
   JellyfinDescriptor,
   JellyfinItem,
+  PersonDescriptor,
   QueryResult,
   UserItemDataDto,
 } from './types.js';
@@ -274,7 +275,7 @@ export function sortNameFor(name: string): string {
 
 function peopleDtos(people: EnrichedPerson[]) {
   return people.map((p) => {
-    const pid = personId(p.name);
+    const pid = personId(personDescriptorOf(p));
     if (p.photo) rememberImages(pid, { Primary: p.photo });
     return {
       Name: p.name,
@@ -370,19 +371,23 @@ export function buildGenre(
   };
 }
 
+function personDescriptorOf(p: EnrichedPerson): PersonDescriptor {
+  return { k: 'person', n: p.name, ...(p.id && { i: p.id }) };
+}
+
 export function buildPerson(
   ctx: ItemBuildContext,
-  name: string,
+  d: PersonDescriptor,
   photo?: string
 ): JellyfinItem {
-  const id = personId(name);
-  const item = baseItem(ctx, id, name, 'Person', false);
+  const id = personId(d);
+  const item = baseItem(ctx, id, d.n, 'Person', false);
   if (photo) {
     item.ImageTags = imageTagsFor({ Primary: photo }).ImageTags;
     rememberImages(id, { Primary: photo });
     item.PrimaryImageAspectRatio = 0.6666;
   }
-  return { ...item, _aio: { descriptor: { k: 'person', n: name } } };
+  return { ...item, _aio: { descriptor: d } };
 }
 
 export interface ContentBuildOptions {

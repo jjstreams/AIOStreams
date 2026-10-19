@@ -61,6 +61,7 @@ export interface CatalogPageOptions {
   limit: number;
   genre?: string;
   search?: string;
+  similar?: string;
   /** Walk to the end (or the cap) so the total is exact. */
   exactTotal?: boolean;
   /** Take whatever the first page holds instead of walking towards `limit`. */
@@ -169,12 +170,14 @@ export interface CatalogPage {
 
 function buildExtras(
   c: Catalog,
-  opts: { genre?: string; search?: string; skip?: number }
+  opts: { genre?: string; search?: string; similar?: string; skip?: number }
 ): string | undefined {
   const parts: string[] = [];
   if (opts.search) parts.push(`search=${encodeURIComponent(opts.search)}`);
+  if (opts.similar) parts.push(`similar=${encodeURIComponent(opts.similar)}`);
   const genre =
-    opts.genre ?? (opts.search ? undefined : requiredGenreDefault(c));
+    opts.genre ??
+    (opts.search || opts.similar ? undefined : requiredGenreDefault(c));
   if (genre) parts.push(`genre=${encodeURIComponent(genre)}`);
   if (opts.skip) parts.push(`skip=${opts.skip}`);
   return parts.length ? parts.join('&') : undefined;
@@ -193,6 +196,8 @@ export async function getCatalogPage(
   if (opts.search && !isSearchable(catalog))
     return { items: [], total: 0, hasMore: false, keys: [] };
   if (opts.genre && !supportsExtra(catalog, 'genre'))
+    return { items: [], total: 0, hasMore: false, keys: [] };
+  if (opts.similar && !supportsExtra(catalog, 'similar'))
     return { items: [], total: 0, hasMore: false, keys: [] };
 
   const cap = appConfig.jellyfin.maxCatalogItems || Infinity;
@@ -236,6 +241,7 @@ export async function getCatalogPage(
     const extras = buildExtras(catalog, {
       genre: opts.genre,
       search: opts.search,
+      similar: opts.similar,
       skip: pageSkip,
     });
     const res = await limitedCatalog(engine.getUserData().uuid ?? '', () =>
@@ -743,7 +749,7 @@ export async function searchCatalogs(
   const wanted = kinds ? new Set(kinds) : null;
   if (wanted && !wanted.size) return [];
   const searchable = ((engine.getCatalogs() ?? []) as Catalog[]).filter(
-    isSearchable
+    (c) => isSearchable(c) && c.type !== 'person'
   );
   const evidence = userData
     ? await Promise.all(searchable.map((c) => cachedEvidence(userData, c)))
@@ -761,6 +767,37 @@ export async function searchCatalogs(
           types.some((t) => wanted.has(sniffedKind(t, evidence[i]!.leaves)))
         );
       });
+  return searchEach(
+    engine,
+    catalogs,
+    term,
+    limit,
+    (i) => !wanted || wanted.has(entryKind(i, leafEvidence))
+  );
+}
+
+export function searchPersonCatalogs(
+  engine: AIOStreams,
+  term: string,
+  limit: number
+): Promise<MetaPreview[]> {
+  return searchEach(
+    engine,
+    ((engine.getCatalogs() ?? []) as Catalog[]).filter(
+      (c) => isSearchable(c) && c.type === 'person'
+    ),
+    term,
+    limit
+  );
+}
+
+async function searchEach(
+  engine: AIOStreams,
+  catalogs: Catalog[],
+  term: string,
+  limit: number,
+  keep: (item: MetaPreview) => boolean = () => true
+): Promise<MetaPreview[]> {
   if (!catalogs.length) return [];
   /*
    * One page per catalog, not a walk to `limit`: this already fans out across
@@ -781,11 +818,7 @@ export async function searchCatalogs(
     )
   );
   const lists = results.map((r) =>
-    r.status === 'fulfilled'
-      ? r.value.items.filter(
-          (i) => !wanted || wanted.has(entryKind(i, leafEvidence))
-        )
-      : []
+    r.status === 'fulfilled' ? r.value.items.filter(keep) : []
   );
   const seen = new Set<string>();
   const out: MetaPreview[] = [];

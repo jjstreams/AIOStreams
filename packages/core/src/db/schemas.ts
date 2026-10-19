@@ -1236,6 +1236,7 @@ const ManifestCatalogSchema = z.object({
   extra: z.array(ManifestExtraSchema).optional(),
   poster: z.string().nullish(),
   background: z.string().nullish(),
+  idPrefixes: z.array(z.string()).nullish(),
 });
 
 const AddonCatalogDefinitionSchema = z.object({
@@ -1621,12 +1622,15 @@ const MetaPersonSchema = z.object({
   role: z.string(),
   character: z.string().nullish(),
   photo: z.string().nullish(),
+  id: z.string().nullish(),
 });
 
 export type MetaPerson = z.infer<typeof MetaPersonSchema>;
 
+const EntrySchema = z.looseObject({ id: z.string(), type: z.string() });
+
 const CollectionSchema = z.object({
-  items: z.array(z.looseObject({ id: z.string(), type: z.string() })).nullish(),
+  items: z.array(EntrySchema).nullish(),
   sources: z
     .array(
       z.object({
@@ -1670,6 +1674,10 @@ const metaExtensionFields = {
     )
     .nullish(),
   collection: CollectionSchema.nullish(),
+  birthday: z.string().nullish(),
+  deathday: z.string().nullish(),
+  birthPlace: z.string().nullish(),
+  credits: z.array(EntrySchema).nullish(),
 };
 
 const MetaVideoSchema = z

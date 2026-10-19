@@ -2,14 +2,15 @@ import { Router, type Request, type Response } from 'express';
 import {
   buildContentItem,
   buildGenre,
+  buildPerson,
   catalogHasCollections,
   encodeImageTag,
   suggestTitles,
-  filmographyCredits,
+  filmographyPage,
   findPerson,
   recommendedPreviews,
-  sortCredits,
-  titlePreviews,
+  searchPeople,
+  similarPreviews,
   type FilmographyKind,
   Cache,
   collectionMembers,
@@ -552,32 +553,33 @@ async function handleItems(
     return;
   }
   if (pd?.k === 'person' || personIds.length) {
-    let name: string | null = pd?.k === 'person' ? pd.n : null;
-    if (!name && personIds.length) {
+    let person = pd?.k === 'person' ? pd : null;
+    if (!person && personIds.length) {
       const p = await decodeForRequest(ctx, personIds[0]);
       if (p?.kind === 'descriptor' && p.descriptor.k === 'person')
-        name = p.descriptor.n;
+        person = p.descriptor;
     }
-    const found = name ? await findPerson(ctx.userData, name) : null;
+    const found = person
+      ? await findPerson(engine, ctx.userData, person)
+      : null;
     if (found) {
-      const kinds = types
-        ? (['movie', 'series'] as FilmographyKind[]).filter((k) => types.has(k))
-        : undefined;
-      const credits = sortCredits(
-        filmographyCredits(found.person, kinds),
-        qlist(req, 'SortBy'),
-        sortDescending(req)
-      );
-      const previews = await titlePreviews(
-        engine,
-        found.tmdb,
-        credits.slice(startIndex, startIndex + limit)
-      );
-      const items = await itemsFromPreviews(ctx, previews);
-      send(req, res, excludeTypes(req, items), credits.length, startIndex);
+      const page = await filmographyPage(engine, found, {
+        kinds: types
+          ? (['movie', 'series'] as FilmographyKind[]).filter((k) =>
+              types.has(k)
+            )
+          : undefined,
+        sortBy: qlist(req, 'SortBy'),
+        descending: sortDescending(req),
+        startIndex,
+        limit,
+      });
+      const items = await itemsFromPreviews(ctx, page.previews);
+      send(req, res, excludeTypes(req, items), page.total, startIndex);
       return;
     }
     // Without TMDB, a search for the name finds what it can.
+    const name = person?.n;
     const previews = name ? await searchCatalogs(engine, name, limit) : [];
     const items = filterByType(await itemsFromPreviews(ctx, previews), types);
     send(req, res, items, items.length, 0);
@@ -713,14 +715,22 @@ async function handleItems(
   }
 
   if (searchTerm) {
-    const previews = await searchCatalogs(
-      engine,
-      searchTerm,
-      startIndex + limit,
-      searchKindsFor(types),
-      ctx.userData
-    );
-    const items = filterByType(await itemsFromPreviews(ctx, previews), types);
+    const [previews, people] = await Promise.all([
+      searchCatalogs(
+        engine,
+        searchTerm,
+        startIndex + limit,
+        searchKindsFor(types),
+        ctx.userData
+      ),
+      types?.has('person')
+        ? personResults(ctx, searchTerm, startIndex + limit)
+        : [],
+    ]);
+    const items = [
+      ...filterByType(await itemsFromPreviews(ctx, previews), types),
+      ...people,
+    ];
     send(
       req,
       res,
@@ -1318,14 +1328,17 @@ router.get(
     }
     const meta = await getMeta(ctx, desc.t, desc.i);
     const engine = await ctx.engine();
-    // TMDB's picks when it knows the title; else the top of its first genre.
-    const recommended = await recommendedPreviews(
-      engine,
-      ctx.userData,
-      meta ?? { id: desc.i, type: desc.t },
-      desc.k === 'movie' ? 'movie' : 'series',
-      limit
-    );
+    const title = meta ?? { id: desc.i, type: desc.t };
+    // A similar catalog's picks, then TMDB's, then the top of its first genre.
+    const recommended =
+      (await similarPreviews(engine, desc.t, desc.i, meta, limit)) ??
+      (await recommendedPreviews(
+        engine,
+        ctx.userData,
+        title,
+        desc.k === 'movie' ? 'movie' : 'series',
+        limit
+      ));
     if (recommended) {
       const items = await itemsFromPreviews(ctx, recommended);
       send(req, res, items, items.length, 0);
@@ -1498,6 +1511,30 @@ router.get(
   })
 );
 
+async function personResults(
+  ctx: JellyfinRequestContext,
+  term: string,
+  limit: number
+): Promise<JellyfinItem[]> {
+  const people = await searchPeople(
+    await ctx.engine(),
+    ctx.userData,
+    term,
+    limit
+  );
+  return people.flatMap((p) =>
+    p.name
+      ? [
+          buildPerson(
+            ctx.build,
+            { k: 'person', n: p.name, i: p.id },
+            p.poster ?? undefined
+          ),
+        ]
+      : []
+  );
+}
+
 async function hintItems(
   ctx: JellyfinRequestContext,
   term: string,
@@ -1543,7 +1580,12 @@ router.get(
       res.json({ SearchHints: [], TotalRecordCount: 0 });
       return;
     }
-    const items = filterByType(await hintItems(ctx, term, limit, types), types);
+    const wantsPeople = types?.has('person') || qb(req, 'IncludePeople');
+    const [titles, people] = await Promise.all([
+      hintItems(ctx, term, limit, types),
+      wantsPeople ? personResults(ctx, term, limit) : [],
+    ]);
+    const items = [...filterByType(titles, types), ...people];
     res.json({
       SearchHints: items.map((i) => ({
         ItemId: i.Id,
@@ -1561,6 +1603,16 @@ router.get(
       })),
       TotalRecordCount: items.length,
     });
+  })
+);
+
+router.get(
+  '/Persons',
+  jf(async (req, res, ctx) => {
+    const term = qs(req, 'SearchTerm')?.trim();
+    const limit = Math.min(Math.max(1, qi(req, 'Limit', 20)), 50);
+    const people = term ? await personResults(ctx, term, limit) : [];
+    send(req, res, people, people.length, 0);
   })
 );
 
