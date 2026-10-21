@@ -108,6 +108,19 @@ export function useNextUp() {
   });
 }
 
+export function mergeRows(
+  resume: BaseItemDto[] | null | undefined,
+  nextUp: BaseItemDto[] | null | undefined
+): BaseItemDto[] {
+  const seen = new Set<string>();
+  return [...(resume ?? []), ...(nextUp ?? [])].filter((item) => {
+    const keys = [item.Id, item.SeriesId].filter((k): k is string => !!k);
+    if (keys.some((k) => seen.has(k))) return false;
+    keys.forEach((k) => seen.add(k));
+    return true;
+  });
+}
+
 export type ItemFilter = 'unplayed' | 'played' | 'favorite';
 
 const FILTERS: Record<ItemFilter, string> = {
@@ -412,6 +425,23 @@ function listedItem(
  * With `page`, for the title's page: a list already loaded that shows the item
  * stands in until it arrives, and it is asked for as the page starts to draw.
  */
+function useItemOptions() {
+  const { client, user } = useSession();
+  const key = useKey();
+  return (itemId: string) =>
+    queryOptions({
+      queryKey: [...key, 'item', itemId],
+      meta: { cache: 'titles' },
+      queryFn: () => requestItem(client, user.Id!, itemId),
+    });
+}
+
+export function useFetchItem() {
+  const queryClient = useQueryClient();
+  const options = useItemOptions();
+  return (itemId: string) => queryClient.fetchQuery(options(itemId));
+}
+
 export function useItem(itemId: string, opts: { page?: boolean } = {}) {
   const { client, user } = useSession();
   const queryClient = useQueryClient();
@@ -422,11 +452,7 @@ export function useItem(itemId: string, opts: { page?: boolean } = {}) {
         : undefined,
     [opts.page, queryClient, client.base, user.Id, itemId]
   );
-  const options = queryOptions({
-    queryKey: [...useKey(), 'item', itemId],
-    meta: { cache: 'titles' },
-    queryFn: () => requestItem(client, user.Id!, itemId),
-  });
+  const options = useItemOptions()(itemId);
   if (opts.page && itemId && !queryClient.getQueryState(options.queryKey))
     void queryClient.prefetchQuery(options);
   return useQuery({ ...options, placeholderData: listed, enabled: !!itemId });
@@ -486,10 +512,11 @@ export function useNextUpFor(seriesId: string, enabled: boolean) {
 }
 
 /** Waits for the episode a show continues with, sharing a request already on its way. */
-export function useNextUpLater(seriesId: string) {
+export function useFetchNextUp() {
   const queryClient = useQueryClient();
-  const nextUp = useShowOptions().nextUp(seriesId);
-  return () => queryClient.fetchQuery(nextUp).then((res) => res.Items?.[0]);
+  const show = useShowOptions();
+  return (seriesId: string) =>
+    queryClient.fetchQuery(show.nextUp(seriesId)).then((res) => res.Items?.[0]);
 }
 
 /** The season a show's page opens on: the first with something left, skipping specials. */
@@ -668,6 +695,12 @@ export function usePickableUsers() {
   });
 }
 
+export function useOwnAvatar(): string | null {
+  const { user } = useSession();
+  const users = usePickableUsers();
+  return users.data?.find((u) => u.user.Id === user.Id)?.avatar ?? null;
+}
+
 export function useActivity(enabled = true) {
   const { client } = useSession();
   return useQuery({
@@ -709,6 +742,32 @@ export function useOwnSessions(enabled: boolean) {
     enabled,
   });
 }
+
+export function useRemoteDevices(
+  opts: { pollMs?: number; enabled?: boolean } = {}
+) {
+  const { client, user } = useSession();
+  return useQuery({
+    queryKey: [...useKey(), REMOTE_DEVICES],
+    queryFn: async () => {
+      const own = client.deviceId.toLowerCase();
+      const sessions = await client.get<SessionInfoDto[]>('/Sessions', {
+        ControllableByUserId: user.Id,
+      });
+      return sessions.filter(
+        (s) =>
+          s.SupportsRemoteControl &&
+          s.DeviceId?.toLowerCase() !== own &&
+          s.PlayableMediaTypes?.some((type) => type === 'Video')
+      );
+    },
+    staleTime: 30_000,
+    refetchInterval: opts.pollMs ?? false,
+    enabled: opts.enabled ?? true,
+  });
+}
+
+export const REMOTE_DEVICES = 'remote-devices';
 
 function playedEntry(userId: string, item: BaseItemDto): HistoryEntry {
   const at = Date.parse(item.UserData?.LastPlayedDate ?? '') || 0;
@@ -916,6 +975,13 @@ export function useSetPlayedUpTo() {
     onSettled: refresh,
   });
 }
+
+/**
+ * Only movies and shows are listed as favourites, and kept on trackers'
+ * watchlists; anything else already one can still be taken off.
+ */
+export const offersFavourite = (type: BaseItemDto['Type'], favorite: boolean) =>
+  favorite || type === 'Movie' || type === 'Series';
 
 export function useSetFavorite() {
   const { client, user } = useSession();

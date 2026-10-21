@@ -188,6 +188,9 @@ pub struct Settings {
     pub audio_device: Option<String>,
     #[serde(default = "yes")]
     pub dolby_vision: bool,
+    /// Zero sizes the cache from the computer's memory.
+    #[serde(default)]
+    pub cache_mb: u64,
     #[serde(flatten)]
     pub sound: Sound,
 }
@@ -227,6 +230,8 @@ pub struct PlayerState {
     pub subtitle: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fullscreen: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passthrough: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -249,6 +254,13 @@ pub struct Track {
     /// Where an added track was loaded from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleLine {
+    pub start_ms: f64,
+    pub end_ms: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -433,6 +445,72 @@ pub fn change(change: &Change) -> Result<Vec<(&'static str, String)>, String> {
     Ok(props)
 }
 
+/// The secondary subtitle's events, which mpv reports whether it shows them or not.
+pub const REFERENCE_LINES: &str = "secondary-sub-text/ass-full";
+
+/// Steps the secondary subtitle on to its next event, reaching lines mpv has read but not yet played.
+pub const NEXT_REFERENCE_LINE: &[&str] = &["no-osd", "sub-step", "1", "secondary"];
+
+/// Reads a file's own subtitle through the hidden secondary subtitle, which the page never shows.
+pub fn reference(track: Option<&str>) -> Result<Vec<(&'static str, String)>, String> {
+    let id = track_id(&track.map(String::from))?;
+    Ok(if track.is_some() {
+        vec![
+            ("secondary-sub-visibility", flag(false)),
+            ("secondary-sid", id),
+        ]
+    } else {
+        vec![
+            ("secondary-sid", id),
+            ("secondary-sub-visibility", flag(true)),
+        ]
+    })
+}
+
+const PICTURE_CODECS: &[&str] = &["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"];
+
+/// One of the file's own subtitles, by mpv's id.
+pub struct OwnSubtitle {
+    pub id: String,
+    pub picture: bool,
+}
+
+/// The file's own subtitles, in file order.
+pub fn own_subtitles(track_list: &Value) -> Vec<OwnSubtitle> {
+    track_list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|t| t["type"] == "sub" && t["external"] != true)
+        .filter_map(|t| {
+            Some(OwnSubtitle {
+                id: t["id"].as_u64()?.to_string(),
+                picture: PICTURE_CODECS.contains(&t["codec"].as_str().unwrap_or("")),
+            })
+        })
+        .collect()
+}
+
+/// The times of [`REFERENCE_LINES`]' `Dialogue: layer,start,end,...` events.
+pub fn subtitle_lines(events: &str) -> Vec<SubtitleLine> {
+    let ms = |time: &str| -> Option<f64> {
+        let mut parts = time.splitn(3, ':');
+        let hours: f64 = parts.next()?.parse().ok()?;
+        let minutes: f64 = parts.next()?.parse().ok()?;
+        let seconds: f64 = parts.next()?.parse().ok()?;
+        Some(((hours * 60.0 + minutes) * 60.0 + seconds) * 1000.0)
+    };
+    events
+        .lines()
+        .filter_map(|event| {
+            let mut fields = event.strip_prefix("Dialogue: ")?.splitn(4, ',').skip(1);
+            let start_ms = ms(fields.next()?)?.round();
+            let end_ms = ms(fields.next()?)?.round();
+            (end_ms > start_ms).then_some(SubtitleLine { start_ms, end_ms })
+        })
+        .collect()
+}
+
 /// Everything but `sub-scale`, which waits on whether the subtitle is a picture.
 /// `own_font` is mpv's font from before the page set one.
 pub fn style(style: &Style, own_font: &str) -> Result<Vec<(&'static str, String)>, String> {
@@ -509,6 +587,27 @@ pub fn settings(settings: &Settings, hwdec: &str) -> Vec<(&'static str, String)>
     }
     props
 }
+
+pub fn auto_cache(memory: Option<u64>) -> u64 {
+    memory
+        .map_or(CACHE_MIN, |m| m / 16)
+        .clamp(CACHE_MIN, CACHE_MAX)
+}
+
+pub fn cache(cache_mb: u64, auto: u64) -> [(&'static str, String); 2] {
+    let bytes = if cache_mb > 0 {
+        cache_mb * 1_000_000
+    } else {
+        auto
+    };
+    [
+        ("demuxer-max-bytes", (bytes - bytes / 4).to_string()),
+        ("demuxer-max-back-bytes", (bytes / 4).to_string()),
+    ]
+}
+
+const CACHE_MIN: u64 = 256 << 20;
+const CACHE_MAX: u64 = 1 << 30;
 
 /// The stats overlay's bindings that move it from `shown` to `page`; a page toggle hides it when shown.
 pub fn stats_overlay(shown: Option<&str>, page: Option<&str>) -> Result<Vec<Vec<String>>, String> {
@@ -597,6 +696,10 @@ pub fn report(name: &str, value: &Value, external: bool) -> Option<Outbound> {
         "sid" => state.subtitle = Some(track(value)),
         // The app's own window follows the page's full screen.
         "fullscreen" if external => state.fullscreen = on,
+        "audio-params" => {
+            let format = value.get("format").and_then(Value::as_str);
+            state.passthrough = Some(format.is_some_and(|f| f.starts_with("spdif")));
+        }
         "track-list" => {
             return Some(Outbound::PlayerTracks {
                 tracks: tracks(value),

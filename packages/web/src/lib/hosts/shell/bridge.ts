@@ -1,6 +1,7 @@
 import { t } from '@lingui/core/macro';
 import React from 'react';
 import type { HostEvent } from '../../downloads/types';
+import type { Span } from '../../subtitles/align';
 
 /** A track as the app's player lists it; `url` is where an added one came from. */
 export interface AppTrack {
@@ -16,6 +17,9 @@ export interface AppTrack {
   external: boolean;
   url?: string;
 }
+
+/** What draws the video in the Mac app. */
+export type VideoOutput = 'mpv' | 'system' | 'compatibility';
 
 /** `external` marks what the player in its own window sends. */
 export type ShellMessage =
@@ -36,9 +40,21 @@ export type ShellMessage =
       audio?: string | null;
       subtitle?: string | null;
       fullscreen?: boolean;
+      passthrough?: boolean;
       external?: boolean;
     }
   | { type: 'player-tracks'; tracks: AppTrack[]; external?: boolean }
+  /** When lines of the file's subtitle asked for with `player-subtitle-lines` show. */
+  | { type: 'player-subtitle-lines'; track: string; lines: Span[] }
+  /** Answers `player-subtitle-index`: each of the file's own subtitles' lines by track, or null without an index. */
+  | { type: 'player-subtitle-index'; tracks: Record<string, Span[]> | null }
+  /** Where the app serves the JPEG of a keyframe asked for with `player-thumbnail`; without `src` the file has none. */
+  | {
+      type: 'player-thumbnail';
+      url: string;
+      positionMs?: number;
+      src: string | null;
+    }
   | {
       type: 'player-chapters';
       chapters: { title?: string; startMs: number }[];
@@ -94,9 +110,22 @@ export type ShellMessage =
       /** Whether the app can re-encode sound to Dolby Digital. */
       ac3Encoder?: boolean;
     }
+  | {
+      type: 'video-output';
+      /** Empty where the app has no choice. */
+      outputs: VideoOutput[];
+      running: VideoOutput;
+      chosen: VideoOutput;
+    }
   | { type: 'diagnostics'; text: string }
   /** Empty when the last run ended normally or was already shown. */
-  | { type: 'crash-report'; at?: number; summary?: string; details?: string }
+  | {
+      type: 'crash-report';
+      at?: number;
+      summary?: string;
+      details?: string;
+      page?: boolean;
+    }
   | {
       type: 'update-state';
       state: 'checking' | 'downloading' | 'ready' | 'current' | 'error' | 'off';

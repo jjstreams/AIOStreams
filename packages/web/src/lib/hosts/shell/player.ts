@@ -1,7 +1,11 @@
 import { t } from '@lingui/core/macro';
 import { formatBytes } from '@aiostreams/ui/core/format';
 import { fullTitle } from '../../format';
-import { base64, checkSubtitleFile } from '../../subtitles/files';
+import {
+  base64,
+  checkSubtitleFile,
+  readSubtitleFile,
+} from '../../subtitles/files';
 import { settings, type SubtitleStyle } from '../../settings';
 import { subtitleLanguages } from '../../user-config';
 import {
@@ -12,6 +16,7 @@ import {
   subtitleScale,
 } from '../../subtitles/style';
 import { parseChapters } from '../../playback/chapters';
+import type { Span } from '../../subtitles/align';
 import {
   ownTrackLabel,
   type QueuedEpisode,
@@ -186,6 +191,9 @@ let linger: ReturnType<typeof setTimeout> | undefined;
 let advanced: { itemId: string; sourceId: string } | null = null;
 
 const SUBTITLE_TYPES = ['srt', 'vtt', 'ass', 'ssa', 'sub', 'sup'];
+/** The apps list an added file under its name, cut to this length. */
+const NAME_LENGTH = 200;
+const INDEX_WAIT_MS = 12_000;
 
 const SUBTITLE_MODES = {
   Default: 'default',
@@ -220,6 +228,8 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
 
   let file: EngineFile | null = null;
   let tracks: AppTrack[] = [];
+  /** Files the user added, by the name the player lists them under. */
+  const added = new Map<string, string>();
   let queued: QueuedEpisode | null = null;
   let moved = false;
   // Offered once per file.
@@ -250,6 +260,7 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
       label: ownTrackLabel(t.title, t.language, Number(t.id)),
       lang: t.language,
       title: t.title,
+      codec: t.codec,
       forced: t.forced,
       hearingImpaired: t.hearingImpaired,
       visualImpaired: t.visualImpaired,
@@ -291,6 +302,7 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
       unsubscribe();
       file = next;
       tracks = [];
+      added.clear();
       moved = false;
       retried = false;
       let buffering = false;
@@ -327,6 +339,9 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
               ...(m.audio !== undefined && { audio: m.audio }),
               ...(m.subtitle !== undefined && { subtitle: m.subtitle }),
               ...(m.fullscreen !== undefined && { fullscreen: m.fullscreen }),
+              ...(m.passthrough !== undefined && {
+                passthrough: m.passthrough,
+              }),
             });
             if (idle === undefined || !adopting) return;
             adopting = false;
@@ -467,12 +482,69 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
     toggleFullscreen: external
       ? () => send('player-set', { fullscreen: !fullscreen })
       : () => shell.send({ type: 'fullscreen' }),
+    ownText(id) {
+      const track = tracks.find((t) => t.id === id && t.external);
+      return (track?.title && added.get(track.title)) || null;
+    },
+    watchLines: external
+      ? undefined
+      : (id, onLines) => {
+          send('player-subtitle-lines', { track: id });
+          const stop = shell.subscribe((m) => {
+            if (m.type === 'player-subtitle-lines' && m.track === id)
+              onLines(m.lines);
+          });
+          return () => {
+            stop();
+            send('player-subtitle-lines', { track: null });
+          };
+        },
+    // The app gives up on the index well before this; an app that never answers has none to give.
+    subtitleIndex: external
+      ? undefined
+      : () =>
+          new Promise((resolve) => {
+            const done = (tracks: Record<string, Span[]> | null) => {
+              clearTimeout(timer);
+              stop();
+              resolve(tracks);
+            };
+            const timer = setTimeout(() => done(null), INDEX_WAIT_MS);
+            const stop = shell.subscribe((m) => {
+              if (m.type === 'player-subtitle-index') done(m.tracks);
+            });
+            send('player-subtitle-index');
+          }),
+    thumbnails: external
+      ? undefined
+      : ({ url, headers }, onThumbnail) => ({
+          want: (positionMs, showingMs) =>
+            shell.send({
+              type: 'player-thumbnail',
+              url,
+              headers,
+              positionMs,
+              showingMs,
+            }),
+          prepare: () => shell.send({ type: 'player-thumbnail', url, headers }),
+          stop: shell.subscribe((m) => {
+            if (m.type !== 'player-thumbnail' || m.url !== url) return;
+            onThumbnail(
+              m.src ? { positionMs: m.positionMs ?? 0, src: m.src } : null
+            );
+          }),
+        }),
     subtitleFiles: {
       types: SUBTITLE_TYPES,
-      add: async (added) => {
-        checkSubtitleFile(added, SUBTITLE_TYPES);
-        const data = await base64(added);
-        send('subtitle-file', { name: added.name, data });
+      add: async (picked) => {
+        checkSubtitleFile(picked, SUBTITLE_TYPES);
+        const data = await base64(picked);
+        // A file only the player can read just isn't synced.
+        await readSubtitleFile(picked).then(
+          ({ text }) => added.set(picked.name.slice(0, NAME_LENGTH), text),
+          () => {}
+        );
+        send('subtitle-file', { name: picked.name, data });
       },
     },
     get stats() {
@@ -579,11 +651,11 @@ export function playerSettings() {
     dialogueBoost: audio.dialogueBoost.read(),
     nightMode: audio.nightMode.read(),
     ac3Encode: audio.ac3Encode.read(),
+    cacheMb: Number(settings.player.cacheSize.read()) || 0,
     ...(android
       ? {
           frameRate: video.frameRate.read(),
           tunneling: video.tunneling.read(),
-          cacheMb: Number(settings.player.cacheSize.read()) || 0,
         }
       : { audioDevice: audio.device.read() }),
   };

@@ -366,7 +366,7 @@ function Household({ onJoin }: { onJoin(invite: PartyInvite): void }) {
             data-ui="party-listing"
             className="flex items-center gap-3 rounded-xl bg-white/5 p-3"
           >
-            <UserAvatar name={p.host} className="size-9" />
+            <UserAvatar name={p.host} src={p.avatar} className="size-9" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">
                 <Trans>{host}'s party</Trans>
@@ -534,14 +534,14 @@ function PreviewDetails({
   preview: PartyPreview;
   relay: string;
 }) {
-  const { host, others, playing } = preview;
+  const { host, hostAvatar, others, playing } = preview;
   const count = others.length + 1;
   const on = relayHost(relay);
   const names = nameList(others);
   return (
     <>
       <div className="flex items-center gap-3">
-        <UserAvatar name={host} className="size-10" />
+        <UserAvatar name={host} src={hostAvatar} className="size-10" />
         <div className="min-w-0">
           <p className="truncate font-semibold">
             <Trans>{host}'s party</Trans>
@@ -655,6 +655,7 @@ function PartyDetails({ state }: { state: PartyState }) {
   const host = !!state.members.find((m) => m.you)?.host;
   const [messages, setMessages] = useSetting(settings.party.messages);
   const [reactions, setReactions] = useSetting(settings.party.reactions);
+  const [speedSync, setSpeedSync] = useSetting(settings.party.speedSync);
   const watching = state.members.length;
   return (
     <>
@@ -701,6 +702,15 @@ function PartyDetails({ state }: { state: PartyState }) {
           label={t`Reactions`}
           value={reactions}
           onValueChange={setReactions}
+        />
+      </Section>
+      <Section name="sync" title={t`Keeping in step`}>
+        <Switch
+          side="right"
+          label={t`Change speed to catch up`}
+          help={t`Off, the video jumps instead.`}
+          value={speedSync}
+          onValueChange={setSpeedSync}
         />
       </Section>
       <Section name="leave">
@@ -875,9 +885,13 @@ function Member({ member, host }: { member: PartyMember; host: boolean }) {
   return (
     <li
       data-ui="party-member"
+      data-you={member.you || undefined}
+      data-host={member.host || undefined}
+      data-away={member.away || undefined}
+      data-buffering={member.buffering || undefined}
       className="flex items-center gap-3 rounded-xl p-2"
     >
-      <UserAvatar name={member.name} className="size-9" />
+      <UserAvatar name={member.name} src={member.avatar} className="size-9" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold">
           {member.name}
@@ -1031,6 +1045,7 @@ function ChatMessages({ chat, live }: { chat: PartyMessage[]; live: boolean }) {
         key={m.key}
         data-ui="party-message"
         data-status={m.status}
+        data-you={m.you || undefined}
         className={cn(
           'flex flex-col',
           m.you ? 'items-end' : 'items-start',

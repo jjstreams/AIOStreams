@@ -20,12 +20,18 @@ import { currentHost } from '../../lib/hosts';
 import { appBridge } from '../../lib/hosts/shell/bridge';
 import type { PlayerController } from '../../lib/playback/controller';
 import { settings, useSetting } from '../../lib/settings';
-import { delayNotice } from '../../lib/subtitles/delay';
+import { delayNotice, syncNotice } from '../../lib/subtitles/delay';
 import { useLatest } from '../../lib/use-latest';
 import type { BaseItemDto, MediaSegmentDto } from '../../lib/types';
-import { ControlButton, MiddleButton, PlayerAction } from './buttons';
+import {
+  ControlButton,
+  ControlsShown,
+  MiddleButton,
+  PlayerAction,
+} from './buttons';
 import { EpisodesSheet } from './episodes';
 import {
+  Notice,
   ScrubReadout,
   SpeedPill,
   useNotice,
@@ -44,7 +50,7 @@ import { SyncByEar, SyncToLine } from './subtitle-sync';
 import { Volume } from './volume';
 import { usePlayhead, type Playhead } from '../../lib/playback/playhead';
 
-const IDLE_MS = 2000;
+const IDLE_MS = 5000;
 
 interface Transport {
   name: string;
@@ -133,6 +139,11 @@ export function PlayerControls({
   const [flash, showFlash] = useToggleFlash();
   const [seekFlash, showSeekFlash] = useSeekFlash();
   const [notice, showNotice] = useNotice();
+  const syncOutcome = player.autoSync?.outcome;
+  React.useEffect(() => {
+    const text = syncOutcome && syncNotice(syncOutcome);
+    if (text) showNotice(text, 'failed' in syncOutcome ? 4000 : 2000);
+  }, [syncOutcome, showNotice]);
   const togglePlay = () => {
     showFlash(latest.current.state.paused);
     latest.current.togglePlay();
@@ -340,7 +351,7 @@ export function PlayerControls({
       </div>
     );
 
-  return (
+  const controls = (
     <div
       ref={root}
       data-ui="player-controls"
@@ -431,7 +442,8 @@ export function PlayerControls({
 
       {!touch && <div className="contents max-lg:hidden">{flash}</div>}
       {seekFlash}
-      {notice}
+      {notice ||
+        (player.autoSync?.waiting && <Notice text={t`Syncing subtitles…`} />)}
       {scrub && (
         <ScrubReadout
           fromMs={scrub.fromMs}
@@ -535,6 +547,7 @@ export function PlayerControls({
           chapters={player.chapters ?? []}
           previewMs={shownAt}
           handle={touch}
+          thumbnails={player.thumbnails}
           onSeek={player.seek}
           onStep={(direction) => seekBy(direction * seekStep * 1000)}
           onTogglePlay={togglePlay}
@@ -593,6 +606,9 @@ export function PlayerControls({
         />
       )}
     </div>
+  );
+  return (
+    <ControlsShown.Provider value={visible}>{controls}</ControlsShown.Provider>
   );
 }
 

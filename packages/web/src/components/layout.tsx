@@ -46,7 +46,7 @@ import { Sidebar, type SidebarItem } from '@aiostreams/ui/shared/sidebar';
 import { cn } from '@aiostreams/ui/core/styling';
 import { useMediaQuery } from '@aiostreams/ui/hooks/media-query';
 import { useSession } from '../lib/session';
-import { usePickableUsers } from '../lib/queries';
+import { useOwnAvatar, usePickableUsers } from '../lib/queries';
 import { navigate, to } from '../lib/paths';
 import { currentHost } from '../lib/hosts';
 import { pageRtl } from '../lib/direction';
@@ -68,6 +68,10 @@ import { UserAvatar } from './user-avatar';
 import { BrandLogo } from './brand-logo';
 import { BarSurface } from './bar-surface';
 import { VersionPickerProvider } from './version-picker';
+import { RemoteTarget } from './remote-target';
+import { RemoteSheet } from './remote-sheet';
+import { WatchNextSync } from './watch-next';
+import { RandomPick } from './random-pick';
 import { ItemMenuHost } from './item-menu';
 import { HomePage } from '../pages/home';
 import { PageShown } from '../lib/page-shown';
@@ -100,8 +104,7 @@ function Logo() {
 /** The signed-in user's picture, in a sidebar item's icon slot. */
 function SidebarAvatar({ className }: { className?: string }) {
   const { user } = useSession();
-  const users = usePickableUsers();
-  const avatar = users.data?.find((u) => u.user.Id === user.Id)?.avatar ?? null;
+  const avatar = useOwnAvatar();
   return (
     <UserAvatar
       name={user.Name}
@@ -467,6 +470,7 @@ export function WebLayout() {
   const playing = useChildMatches({
     select: (matches) => !!matches[0]?.pathname.startsWith('/play/'),
   });
+  useServerEvents(playing);
   // Home stays, hidden, while other pages and the player are open: going back
   // to its entry shows it again rather than building it anew. Any other visit
   // starts afresh.
@@ -687,6 +691,9 @@ export function WebLayout() {
                   />
                 )}
                 <VersionPickerProvider>
+                  <RemoteTarget />
+                  <RandomPick />
+                  {currentHost().watchNext && <WatchNextSync />}
                   <ItemMenuHost>
                     <GlideLayers name="page">
                       {kept && (
@@ -748,6 +755,7 @@ export function WebLayout() {
       </div>
       {playing && <Outlet />}
       <PartyHost />
+      <RemoteSheet />
     </>
   );
 }
@@ -755,7 +763,6 @@ export function WebLayout() {
 /** What runs while pages are open, and stops while the player is. */
 function PagesWork({ pathname }: { pathname: string }) {
   useDiscordBrowsing(pathname);
-  useServerEvents();
   useDownloadRunner();
   usePendingStops();
   useAction('search', () => navigate(to.search()));

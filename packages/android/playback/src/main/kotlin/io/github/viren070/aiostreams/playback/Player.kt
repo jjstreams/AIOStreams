@@ -114,13 +114,14 @@ data class PlayerState(
     val speed: Double? = null,
     val audio: Pick? = null,
     val subtitle: Pick? = null,
+    val passthrough: Boolean? = null,
 ) {
     /** `next` over this, as a later report wins. */
     fun then(next: PlayerState) = PlayerState(
         next.positionMs ?: positionMs, next.durationMs ?: durationMs, next.bufferedMs ?: bufferedMs,
         next.paused ?: paused, next.buffering ?: buffering, next.seeking ?: seeking, next.idle ?: idle,
         next.volume ?: volume, next.maxVolume ?: maxVolume, next.muted ?: muted, next.speed ?: speed,
-        next.audio ?: audio, next.subtitle ?: subtitle,
+        next.audio ?: audio, next.subtitle ?: subtitle, next.passthrough ?: passthrough,
     )
 
     fun changesFrom(previous: PlayerState) = PlayerState(
@@ -137,6 +138,7 @@ data class PlayerState(
         speed = speed.takeIf { it != previous.speed },
         audio = audio.takeIf { it != previous.audio },
         subtitle = subtitle.takeIf { it != previous.subtitle },
+        passthrough = passthrough.takeIf { it != previous.passthrough },
     )
 }
 
@@ -157,6 +159,8 @@ data class PlayerTrack(
 )
 
 data class PlayerChapter(val title: String?, val startMs: Double)
+
+data class SubtitleLine(val startMs: Double, val endMs: Double)
 
 /** A stretch the page offers to skip, or skips itself when [auto]. */
 data class Skip(val startMs: Double, val endMs: Double, val auto: Boolean)
@@ -223,6 +227,9 @@ object PlayerProtocol {
         )
     }
 
+    /** The file's own subtitle whose lines the page asks for, or none. */
+    fun reference(message: JsonObject) = runCatching { pick(message, "track") ?: Pick(null) }
+
     fun skips(message: JsonObject) = (message["segments"] as? JsonArray).orEmpty().mapNotNull { segment ->
         val range = segment as? JsonObject ?: return@mapNotNull null
         val start = range.number("startMs") ?: return@mapNotNull null
@@ -254,6 +261,7 @@ object PlayerProtocol {
         state.speed?.let { put("speed", it) }
         state.audio?.let { put("audio", it.id) }
         state.subtitle?.let { put("subtitle", it.id) }
+        state.passthrough?.let { put("passthrough", it) }
     }
 
     fun tracks(tracks: List<PlayerTrack>) = buildJsonObject {
@@ -282,6 +290,26 @@ object PlayerProtocol {
                 chapter.title?.let { put("title", it) }
                 put("startMs", chapter.startMs)
             })
+        })
+    }
+
+    fun subtitleLines(track: String, lines: List<SubtitleLine>) = buildJsonObject {
+        put("type", "player-subtitle-lines")
+        put("track", track)
+        put("lines", linesJson(lines))
+    }
+
+    /** Each of `own`'s lines by track id, in the order the index lists them; null without an index. */
+    fun subtitleIndex(own: List<String>, lines: List<List<SubtitleLine>>?) = buildJsonObject {
+        put("type", "player-subtitle-index")
+        if (lines.isNullOrEmpty() || lines.size != own.size) put("tracks", JsonNull)
+        else put("tracks", buildJsonObject { for ((id, track) in own.zip(lines)) put(id, linesJson(track)) })
+    }
+
+    private fun linesJson(lines: List<SubtitleLine>) = buildJsonArray {
+        for (line in lines) add(buildJsonObject {
+            put("startMs", line.startMs)
+            put("endMs", line.endMs)
         })
     }
 
