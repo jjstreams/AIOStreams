@@ -10,7 +10,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import type { JellyfinClient } from './client';
+import type { JellyfinClient, Purpose } from './client';
 import { useSession } from './session';
 import { useFeature } from './server-info';
 import { settings, useSetting } from './settings';
@@ -108,17 +108,28 @@ export function useNextUp() {
   });
 }
 
+/** When a title was last watched; for a next episode, when its show was. */
+export function watchedAt(item: BaseItemDto): number {
+  const show = (item as { aiostreams?: { showWatchedAt?: unknown } }).aiostreams
+    ?.showWatchedAt;
+  const at = typeof show === 'string' ? show : item.UserData?.LastPlayedDate;
+  return (at && Date.parse(at)) || 0;
+}
+
+/** Most recently watched first; next episodes without times stay after resume points. */
 export function mergeRows(
   resume: BaseItemDto[] | null | undefined,
   nextUp: BaseItemDto[] | null | undefined
 ): BaseItemDto[] {
   const seen = new Set<string>();
-  return [...(resume ?? []), ...(nextUp ?? [])].filter((item) => {
-    const keys = [item.Id, item.SeriesId].filter((k): k is string => !!k);
-    if (keys.some((k) => seen.has(k))) return false;
-    keys.forEach((k) => seen.add(k));
-    return true;
-  });
+  return [...(resume ?? []), ...(nextUp ?? [])]
+    .filter((item) => {
+      const keys = [item.Id, item.SeriesId].filter((k): k is string => !!k);
+      if (keys.some((k) => seen.has(k))) return false;
+      keys.forEach((k) => seen.add(k));
+      return true;
+    })
+    .sort((a, b) => watchedAt(b) - watchedAt(a));
 }
 
 export type ItemFilter = 'unplayed' | 'played' | 'favorite';
@@ -383,13 +394,14 @@ const DETAIL_FIELDS = [
 export async function requestItem(
   client: JellyfinClient,
   userId: string,
-  itemId: string
+  itemId: string,
+  signal?: AbortSignal
 ): Promise<BaseItemDto> {
-  const { Items } = await client.get<BaseItemDtoQueryResult>('/Items', {
-    userId,
-    Ids: itemId,
-    Fields: DETAIL_FIELDS,
-  });
+  const { Items } = await client.get<BaseItemDtoQueryResult>(
+    '/Items',
+    { userId, Ids: itemId, Fields: DETAIL_FIELDS },
+    signal
+  );
   const item = Items?.[0];
   if (!item) throw new Error(t`This item was not found`);
   return item;
@@ -432,7 +444,8 @@ function useItemOptions() {
     queryOptions({
       queryKey: [...key, 'item', itemId],
       meta: { cache: 'titles' },
-      queryFn: () => requestItem(client, user.Id!, itemId),
+      // Dropped once nothing shows it, as the hero asks for each card it passes.
+      queryFn: ({ signal }) => requestItem(client, user.Id!, itemId, signal),
     });
 }
 
@@ -594,6 +607,7 @@ export async function requestPlaybackInfo(
     kept?: boolean;
     /** What the versions may need; the chosen player's by default. */
     support?: { headers: boolean; youtube: boolean };
+    purpose?: Purpose;
   } = {}
 ): Promise<PlaybackInfoResponse> {
   const support = opts.support ?? playerSupport();
@@ -609,7 +623,8 @@ export async function requestPlaybackInfo(
       ...(support.headers && { EnableRequiredHttpHeaders: true }),
       ...(support.youtube && { EnableYouTube: true }),
     },
-    { userId }
+    { userId },
+    opts.purpose
   );
   return { ...info, MediaSources: info.MediaSources?.map(withOwnId) };
 }
@@ -618,17 +633,28 @@ function usePlaybackInfoRequest() {
   const { client, user } = useSession();
   return (
     itemId: string,
-    opts: { refresh?: boolean; sourceId?: string; kept?: boolean } = {}
+    opts: {
+      refresh?: boolean;
+      sourceId?: string;
+      kept?: boolean;
+      purpose?: Purpose;
+    } = {}
   ) => requestPlaybackInfo(client, user.Id!, itemId, opts);
 }
 
 export function usePlaybackInfoOptions() {
   const request = usePlaybackInfoRequest();
   const key = useKey();
-  return (itemId: string, sourceId?: string) =>
+  return (itemId: string, sourceId?: string, purpose?: Purpose) =>
     queryOptions({
-      queryKey: [...key, 'playback-info', itemId, sourceId ?? null],
-      queryFn: () => request(itemId, { sourceId }),
+      queryKey: [
+        ...key,
+        'playback-info',
+        itemId,
+        sourceId ?? null,
+        ...(purpose ? [purpose] : []),
+      ],
+      queryFn: () => request(itemId, { sourceId, purpose }),
       staleTime: 10 * 60_000,
     });
 }
@@ -645,12 +671,13 @@ export function usePlaybackInfo(
     kept?: boolean;
     sourceId?: string;
     enabled?: boolean;
+    purpose?: Purpose;
   } = {}
 ) {
   const options = usePlaybackInfoOptions();
   const request = usePlaybackInfoRequest();
   return useQuery({
-    ...options(itemId, opts.sourceId),
+    ...options(itemId, opts.sourceId, opts.purpose),
     ...(opts.kept && {
       queryFn: () => request(itemId, { kept: true }),
       staleTime: Infinity,
@@ -660,14 +687,17 @@ export function usePlaybackInfo(
   });
 }
 
-export function useRefreshPlaybackInfo(itemId: string) {
+export function useRefreshPlaybackInfo(itemId: string, purpose?: Purpose) {
   const queryClient = useQueryClient();
   const request = usePlaybackInfoRequest();
   const options = usePlaybackInfoOptions();
   return useMutation({
-    mutationFn: () => request(itemId, { refresh: true }),
+    mutationFn: () => request(itemId, { refresh: true, purpose }),
     onSuccess: (data) =>
-      queryClient.setQueryData(options(itemId).queryKey, data),
+      queryClient.setQueryData(
+        options(itemId, undefined, purpose).queryKey,
+        data
+      ),
   });
 }
 

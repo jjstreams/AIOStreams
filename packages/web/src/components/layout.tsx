@@ -981,8 +981,11 @@ function TvRail({
     open || !floating
       ? undefined
       : 'opacity-0 transition-opacity group-focus-within/rail:opacity-100';
-  // Shut, the clear panel is clipped to its icons; its buttons keep pointer events, which focus moves need.
-  const reach = !open && !floating && 'pointer-events-auto';
+  // Shut, the clear panel is clipped to its icons; its buttons keep pointer events and the icons' width, which focus moves need.
+  const reach =
+    !open &&
+    !floating &&
+    'pointer-events-auto w-14 group-focus-within/rail:w-full';
   const entry = (item: SidebarItem) => {
     const Icon = item.iconType;
     return (
@@ -1006,8 +1009,9 @@ function TvRail({
       className={cn('w-full', reach)}
     />
   );
+  const divider = <div className="mx-3 my-1 h-px flex-none bg-white/10" />;
   const shade = !open && (
-    <div className="pointer-events-none fixed inset-y-0 start-0 -z-10 w-[36rem] bg-gradient-to-r from-black via-black/85 to-transparent rtl:bg-gradient-to-l opacity-0 transition-opacity duration-200 group-focus-within/rail:opacity-100" />
+    <div className="pointer-events-none fixed inset-y-0 start-0 -z-10 w-[36rem] bg-gradient-to-r from-black via-black/85 to-transparent rtl:bg-gradient-to-l opacity-0 transition-opacity duration-200 will-change-[opacity] group-focus-within/rail:opacity-100" />
   );
   if (floating) {
     return (
@@ -1027,10 +1031,11 @@ function TvRail({
             open ? 'w-56' : 'w-[calc(4rem+2px)] group-focus-within/rail:w-56'
           )}
         >
-          {items.map(entry)}
-          <div className="mx-3 my-1 h-px flex-none bg-white/10" />
-          {footerItems.map(entry)}
           {account}
+          {divider}
+          {items.map(entry)}
+          {divider}
+          {footerItems.map(entry)}
         </BarSurface>
       </nav>
     );
@@ -1071,15 +1076,16 @@ function TvRail({
         // The open panel fades in over these, as a changing width lays the page out every frame.
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-y-0 start-0 flex w-20 flex-col gap-1 px-3 py-8 transition-opacity duration-200 group-focus-within/rail:opacity-0"
+          className="pointer-events-none absolute inset-y-0 start-0 flex w-20 flex-col gap-1 px-3 py-8 transition-opacity duration-200 will-change-[opacity] group-focus-within/rail:opacity-0"
         >
           {logo}
+          {glyph({ id: 'account' }, <YouIcon />)}
+          {divider}
           {items.map((item) => glyph(item, item.iconType && <item.iconType />))}
           <div className="mt-auto flex flex-col gap-1">
             {footerItems.map((item) =>
               glyph(item, item.iconType && <item.iconType />)
             )}
-            {glyph({ id: 'account' }, <YouIcon />)}
           </div>
         </div>
       )}
@@ -1087,14 +1093,15 @@ function TvRail({
         className={cn(
           'flex h-full flex-col gap-1 px-3 py-8',
           !open &&
-            'opacity-0 transition-opacity duration-200 [clip-path:inset(0_calc(100%-5rem)_0_0)] group-focus-within/rail:opacity-100 group-focus-within/rail:[clip-path:none]'
+            'opacity-0 transition-opacity duration-200 will-change-[opacity] [clip-path:inset(0_calc(100%-5rem)_0_0)] group-focus-within/rail:opacity-100 group-focus-within/rail:[clip-path:none]'
         )}
       >
         {logo}
+        {account}
+        {divider}
         {items.map(entry)}
         <div className="mt-auto flex flex-col gap-1">
           {footerItems.map(entry)}
-          {account}
         </div>
       </div>
     </nav>
@@ -1143,6 +1150,18 @@ function CornerMenu({
     return () => observer.disconnect();
   }, [shown?.id]);
   const label = cn('transition-opacity duration-300', !open && 'opacity-0');
+  const divider = <div className="mx-3 my-1 h-px flex-none bg-white/10" />;
+  const account = (
+    <NavEntry
+      aria-label={you.name}
+      item={{ id: 'account', name: t`You` }}
+      icon={<YouIcon />}
+      onClick={select(you)}
+      labelClassName={label}
+      inert={!open}
+      className="w-full ps-3 pe-5"
+    />
+  );
   const entry = (item: SidebarItem) => {
     const Icon = item.iconType;
     return (
@@ -1202,18 +1221,12 @@ function CornerMenu({
             transform: open ? undefined : `translateY(${-size.shift}px)`,
           }}
         >
+          {tv && account}
+          {tv && divider}
           {items.map(entry)}
-          <div className="mx-3 my-1 h-px flex-none bg-white/10" />
+          {divider}
           {footerItems.map(entry)}
-          <NavEntry
-            aria-label={you.name}
-            item={{ id: 'account', name: t`You` }}
-            icon={<YouIcon />}
-            onClick={select(you)}
-            labelClassName={label}
-            inert={!open}
-            className="w-full ps-3 pe-5"
-          />
+          {!tv && account}
         </div>
       </BarSurface>
     </nav>

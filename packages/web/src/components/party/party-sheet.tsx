@@ -57,7 +57,6 @@ import {
 } from '../../lib/party/party';
 import { UserAvatar } from '../user-avatar';
 import { QrCode } from './qr-code';
-import { PARTY_REACTIONS } from './reactions';
 
 interface Opening {
   /** What starting a party plays for it, once it has started. */
@@ -119,6 +118,7 @@ export function PartySheet() {
       side="right"
       // Narrow, so a phone on its side keeps most of the video in view.
       size="sm"
+      overlayClass="bg-black/40"
       contentClass="flex flex-col gap-0 overflow-hidden p-0"
       headerClass={cn(GUTTER, 'pb-3 pt-[calc(1rem+env(safe-area-inset-top))]')}
       closeClass="end-[max(0.5rem,env(safe-area-inset-right))] top-[calc(0.75rem+env(safe-area-inset-top))]"
@@ -922,13 +922,14 @@ function Member({ member, host }: { member: PartyMember; host: boolean }) {
 }
 
 function Reactions({ live, compact }: { live: boolean; compact: boolean }) {
+  const [reactions] = useSetting(settings.party.reactionSet);
   return (
     <div
       className={cn('flex flex-wrap justify-center gap-2', compact && 'mb-2')}
     >
-      {PARTY_REACTIONS.map((emoji) => (
+      {reactions.map((emoji, i) => (
         <button
-          key={emoji}
+          key={i}
           type="button"
           data-ui="party-reaction"
           aria-label={t`React with ${emoji}`}

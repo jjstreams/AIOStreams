@@ -162,10 +162,11 @@ function exoStatsText(
   const ahead = num('cacheAhead');
   if (ahead !== undefined) {
     const aheadMs = num('cacheAheadMs');
+    const behindMs = num('cacheBehindMs');
     const speed = num('linkSpeed') ?? 0;
     const ratio = num('linkRatio');
     lines.push(
-      `Cache      ${aheadMs !== undefined ? `${Math.round(aheadMs / 1000)} s` : formatBytes(ahead)} ahead · ${formatBytes(num('cacheBytes'))} of ${formatBytes(num('cacheBudget'))}${speed > 0 ? ` · link ${formatBytes(speed)}/s${ratio ? ` (${ratio.toFixed(1)}× the file)` : ''}` : ''}`
+      `Cache      ${behindMs !== undefined ? `${Math.round(behindMs / 1000)} s behind · ` : ''}${aheadMs !== undefined ? `${Math.round(aheadMs / 1000)} s` : formatBytes(ahead)} ahead · ${formatBytes(num('cacheBytes'))} of ${formatBytes(num('cacheBudget'))}${speed > 0 ? ` · link ${formatBytes(speed)}/s${ratio ? ` (${ratio.toFixed(1)}× the file)` : ''}` : ''}`
     );
   }
   const shown = num('renderedFrames');
@@ -320,9 +321,9 @@ export const appEngine: EngineFactory = (emit, { launched }) => {
         if (fromPlayer(m) && (moved || toLaunched !== external)) return;
         switch (m.type) {
           case 'player-state': {
-            const { positionMs, bufferedMs, idle } = m;
-            if (positionMs !== undefined || bufferedMs !== undefined)
-              emit({ type: 'position', positionMs, bufferedMs });
+            const { positionMs, buffered, idle } = m;
+            if (positionMs !== undefined || buffered !== undefined)
+              emit({ type: 'position', positionMs, buffered });
             if (m.buffering !== undefined) buffering = m.buffering;
             if (m.fullscreen !== undefined) fullscreen = m.fullscreen;
             if (m.seeking !== undefined) seeking = m.seeking;

@@ -53,7 +53,13 @@ import {
   usePlay,
 } from '../lib/playback/play';
 import { currentHost } from '../lib/hosts';
-import { focusOn, keyboardFocus, useRestoreFocus } from '../lib/input';
+import {
+  focusOn,
+  keyboardFocus,
+  tab,
+  tabList,
+  useRestoreFocus,
+} from '../lib/input';
 import { clock, itemSubtitle, itemTitle, ticksToMs } from '../lib/format';
 import { cn } from '@aiostreams/ui/core/styling';
 import { backdropUrl, landscapeUrl } from '../lib/images';
@@ -340,11 +346,12 @@ function Versions({
 }) {
   const { client } = useSession();
   const { item } = request;
+  const purpose = request.download ? 'download' : undefined;
   const info = usePlaybackInfo(
     item.Id!,
-    request.playing ? { kept: true } : { listing: true }
+    request.playing ? { kept: true } : { listing: true, purpose }
   );
-  const refresh = useRefreshPlaybackInfo(item.Id!);
+  const refresh = useRefreshPlaybackInfo(item.Id!, purpose);
   const refreshing = info.isFetching || refresh.isPending;
   const canRefresh = useFeature('refreshVersions');
   const play = usePlay();
@@ -532,20 +539,16 @@ function Versions({
     <div
       data-ui="versions-quick"
       data-nav-group
-      data-nav-enter="[role=tab][aria-selected=true]"
-      role="tablist"
+      {...tabList}
       aria-label={t`Quick filters`}
       className="-m-1 flex gap-1.5 overflow-x-auto p-1 [scrollbar-width:none]"
     >
       <Button
         data-ui="versions-quick-filter"
-        role="tab"
         size="sm"
         intent={chosen ? 'gray-subtle' : 'white'}
         className="flex-none rounded-full"
-        aria-selected={!chosen}
-        tabIndex={chosen ? -1 : 0}
-        onFocus={() => setQuickName(null)}
+        {...tab(!chosen, () => setQuickName(null), 0)}
         onClick={() => setQuickName(null)}
       >
         <Trans>All</Trans>
@@ -554,16 +557,13 @@ function Versions({
         <Button
           key={q.name}
           data-ui="versions-quick-filter"
-          role="tab"
           size="sm"
           intent={chosen === q ? 'white' : 'gray-subtle'}
           className="flex-none rounded-full"
-          aria-selected={chosen === q}
-          tabIndex={chosen === q ? 0 : -1}
+          {...tab(chosen === q, () => setQuickName(q.name), 0)}
           data-count={q.count}
           data-empty={!q.count || undefined}
           disabled={!q.count && chosen !== q}
-          onFocus={() => setQuickName(q.name)}
           onClick={() => setQuickName(q.name)}
         >
           {q.name}

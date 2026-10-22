@@ -41,6 +41,7 @@ import { useFeature } from '../../lib/server-info';
 import { SettingsCard, SettingsRow } from '../../components/settings-card';
 import { BadgesRow, QuickFiltersRow } from '../../components/version-settings';
 import { onDevice, followsYou } from './common';
+import { ReactionSetting } from '../../components/party/reaction-setting';
 
 const nextPromptHelp = (prompt: NextPrompt) =>
   ({
@@ -110,7 +111,6 @@ export function PlaybackSection() {
   const [skipFillers, setSkipFillers] = useSetting(settings.next.skipFillers);
   const [skipRecaps, setSkipRecaps] = useSetting(settings.next.skipRecaps);
   const marked = useFeature('fillers');
-  const parties = useFeature('parties');
   const [partyMessages, setPartyMessages] = useSetting(settings.party.messages);
   const [partyReactions, setPartyReactions] = useSetting(
     settings.party.reactions
@@ -280,34 +280,33 @@ export function PlaybackSection() {
           />
         )}
       </SettingsCard>
-      {parties && (
-        <SettingsCard
-          name="watch-parties"
-          title={t`Watch parties`}
-          description={followsYou()}
-        >
-          <Switch
-            side="right"
-            label={t`Show messages over the video`}
-            help={t`What the people you watch with say shows for a few seconds. It always stays in the party's chat.`}
-            value={partyMessages}
-            onValueChange={setPartyMessages}
-          />
-          <Switch
-            side="right"
-            label={t`Show reactions over the video`}
-            value={partyReactions}
-            onValueChange={setPartyReactions}
-          />
-          <Switch
-            side="right"
-            label={t`Keep in step by changing speed`}
-            help={t`Plays a little faster or slower to catch up with the party. Off, the video jumps instead.`}
-            value={partySpeedSync}
-            onValueChange={setPartySpeedSync}
-          />
-        </SettingsCard>
-      )}
+      <SettingsCard
+        name="watch-parties"
+        title={t`Watch parties`}
+        description={followsYou()}
+      >
+        <Switch
+          side="right"
+          label={t`Show messages over the video`}
+          help={t`What the people you watch with say shows for a few seconds. It always stays in the party's chat.`}
+          value={partyMessages}
+          onValueChange={setPartyMessages}
+        />
+        <Switch
+          side="right"
+          label={t`Show reactions over the video`}
+          value={partyReactions}
+          onValueChange={setPartyReactions}
+        />
+        <ReactionSetting />
+        <Switch
+          side="right"
+          label={t`Keep in step by changing speed`}
+          help={t`Plays a little faster or slower to catch up with the party. Off, the video jumps instead.`}
+          value={partySpeedSync}
+          onValueChange={setPartySpeedSync}
+        />
+      </SettingsCard>
       <SettingsCard
         name="controls"
         title={t`Controls`}

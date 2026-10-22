@@ -22,6 +22,7 @@ export function SeekBar({
   segments,
   chapters,
   previewMs,
+  previewPicture,
   handle,
   thumbnails,
   onSeek,
@@ -36,6 +37,7 @@ export function SeekBar({
   chapters: Chapter[];
   /** Where a swipe on the video would seek to. */
   previewMs: number | null;
+  previewPicture: boolean;
   /** Shows the handle at rest, where nothing hovers. */
   handle: boolean;
   thumbnails?: ThumbnailFeed;
@@ -44,7 +46,7 @@ export function SeekBar({
   onTogglePlay(): void;
 }) {
   const positionMs = usePlayhead(playhead, (h) => h.positionMs, live);
-  const bufferedMs = usePlayhead(playhead, (h) => h.bufferedMs, live);
+  const buffered = usePlayhead(playhead, (h) => h.buffered, live);
   const bar = React.useRef<HTMLDivElement>(null);
   const [hover, setHover] = React.useState<number | null>(null);
   const [drag, setDrag] = React.useState<number | null>(null);
@@ -57,10 +59,11 @@ export function SeekBar({
   const percent = (ms: number) =>
     durationMs ? `${Math.min(100, (ms / durationMs) * 100)}%` : '0%';
   const shown = drag ?? previewMs ?? positionMs;
+  const previewPeek = previewPicture ? previewMs : null;
   // A skip lands about when its picture does, so the picture outlasts it.
   const [held, setHeld] = React.useState<number | null>(null);
-  if (previewMs !== null && previewMs !== held) setHeld(previewMs);
-  const peekMs = durationMs > 0 ? (drag ?? hover ?? previewMs ?? held) : null;
+  if (previewPeek !== null && previewPeek !== held) setHeld(previewPeek);
+  const peekMs = durationMs > 0 ? (drag ?? hover ?? previewPeek ?? held) : null;
   React.useEffect(() => thumbnails?.want(peekMs), [thumbnails, peekMs]);
   React.useEffect(() => () => thumbnails?.want(null), [thumbnails]);
   const picture = React.useSyncExternalStore(
@@ -68,10 +71,10 @@ export function SeekBar({
     () => thumbnails?.current() ?? null
   );
   React.useEffect(() => {
-    if (previewMs !== null || held === null) return;
+    if (previewPeek !== null || held === null) return;
     const timer = setTimeout(() => setHeld(null), SKIP_PICTURE_MS);
     return () => clearTimeout(timer);
-  }, [previewMs, held, picture]);
+  }, [previewPeek, held, picture]);
 
   return (
     <div
@@ -116,11 +119,17 @@ export function SeekBar({
         data-ui="seek-bar-track"
         className="relative h-1 w-full overflow-hidden rounded-full bg-white/20 transition-[height] group-hover/seek:h-1.5 group-focus-visible/seek:h-1.5"
       >
-        <div
-          data-ui="seek-bar-buffered"
-          className="absolute inset-y-0 left-0 bg-white/30"
-          style={{ width: percent(bufferedMs) }}
-        />
+        {buffered.map((r) => (
+          <div
+            key={r.startMs}
+            data-ui="seek-bar-buffered"
+            className="absolute inset-y-0 bg-white/30"
+            style={{
+              left: percent(r.startMs),
+              width: percent(r.endMs - r.startMs),
+            }}
+          />
+        ))}
         {segments.map((s) => (
           <div
             key={`${s.type}-${s.startMs}`}
