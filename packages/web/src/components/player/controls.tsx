@@ -31,6 +31,7 @@ import {
   PlayerAction,
 } from './buttons';
 import { EpisodesSheet } from './episodes';
+import { PlaylistSheet } from '../playlists';
 import {
   Notice,
   ScrubReadout,
@@ -73,6 +74,7 @@ export function PlayerControls({
   offeringNext = false,
   caption,
   steps,
+  playlist,
   onParty,
 }: {
   item: BaseItemDto;
@@ -88,7 +90,8 @@ export function PlayerControls({
   /** Under the title, in place of an episode's own line. */
   caption?: string;
   /** What previous and next move between, where it isn't the show's episodes. */
-  steps?: 'episode' | 'trailer';
+  steps?: 'episode' | 'trailer' | 'playlist';
+  playlist?: { id: string; onPlay(entry: BaseItemDto, playlist: string): void };
   onParty?: () => void;
 }) {
   const { state } = player;
@@ -110,6 +113,7 @@ export function PlayerControls({
   } | null>(null);
   const [byEar, setByEar] = React.useState(false);
   const [episodes, setEpisodes] = React.useState(false);
+  const [listing, setListing] = React.useState(false);
   const [scrub, setScrub] = React.useState<{
     fromMs: number;
     toMs: number;
@@ -128,6 +132,7 @@ export function PlayerControls({
         picking !== null ||
         byEar ||
         episodes ||
+        listing ||
         scrub !== null));
   // The video appears without the controls, unless it opens paused.
   React.useEffect(() => {
@@ -152,9 +157,9 @@ export function PlayerControls({
 
   const [seekStep] = useSetting(settings.controls.seekStep);
   const [burstSeek, seekingTo] = useBurstSeek(player);
-  const [tapSeek, setTapSeek] = React.useState(false);
-  const seekBy = (deltaMs: number, tapped = false) => {
-    setTapSeek(tapped);
+  const [seekPicture, setSeekPicture] = React.useState(true);
+  const seekBy = (deltaMs: number, picture = true) => {
+    setSeekPicture(picture);
     burstSeek(deltaMs);
     showSeekFlash(deltaMs);
   };
@@ -200,7 +205,7 @@ export function PlayerControls({
   const shown = useLatest(visible);
   const gestures = usePlayerGestures({
     player,
-    seekBy: (deltaMs) => seekBy(deltaMs, true),
+    seekBy: (deltaMs) => seekBy(deltaMs, false),
     seekStepMs: seekStep * 1000,
     notice: showNotice,
     onTap: () => (shown.current ? hide() : wake()),
@@ -246,7 +251,7 @@ export function PlayerControls({
     hide,
     notice: showNotice,
     togglePlay,
-    seekBy,
+    seekBy: (deltaMs) => seekBy(deltaMs, tv),
     onBack,
     onPrevious,
     onNext,
@@ -262,13 +267,18 @@ export function PlayerControls({
   const isEpisode = item.Type === 'Episode';
   const listsEpisodes = isEpisode && !!item.SeriesId && !!onEpisode;
   const stepping = steps ?? (isEpisode ? 'episode' : undefined);
+  const stepLabels = {
+    episode: [t`Previous episode`, t`Next episode`],
+    trailer: [t`Previous trailer`, t`Next trailer`],
+    playlist: [t`Previous`, t`Next`],
+  };
   const stepSeconds = seekStep;
   const subtitle = caption ?? (isEpisode ? itemSubtitle(item) : undefined);
   const spinner = <LuLoaderCircle className="animate-spin" />;
   const buttons: Record<string, Transport | false> = {
     previous: !!stepping && {
       name: 'previous',
-      label: stepping === 'trailer' ? t`Previous trailer` : t`Previous episode`,
+      label: stepLabels[stepping][0],
       icon: loadingEpisode === 'previous' ? spinner : <LuSkipBack />,
       onClick: onPrevious,
     },
@@ -295,7 +305,7 @@ export function PlayerControls({
       },
     next: !!stepping && {
       name: 'next',
-      label: stepping === 'trailer' ? t`Next trailer` : t`Next episode`,
+      label: stepLabels[stepping][1],
       icon: loadingEpisode === 'next' ? spinner : <LuSkipForward />,
       onClick: onNext,
     },
@@ -552,11 +562,11 @@ export function PlayerControls({
           segments={segments}
           chapters={player.chapters ?? []}
           previewMs={shownAt}
-          previewPicture={!!scrub || !tapSeek}
+          previewPicture={!!scrub || seekPicture}
           handle={touch}
           thumbnails={player.thumbnails}
           onSeek={player.seek}
-          onStep={(direction) => seekBy(direction * seekStep * 1000)}
+          onStep={(direction) => seekBy(direction * seekStep * 1000, tv)}
           onTogglePlay={togglePlay}
         />
         <div className="flex items-center gap-1">
@@ -579,6 +589,7 @@ export function PlayerControls({
             onMenu={onMenu}
             onVersions={onVersions}
             onEpisodes={listsEpisodes ? () => setEpisodes(true) : undefined}
+            onPlaylist={playlist ? () => setListing(true) : undefined}
             onAddFile={() => fileInput.current?.click()}
             onSyncByEar={() => setByEar(true)}
             onSyncToLine={pickLine}
@@ -595,6 +606,21 @@ export function PlayerControls({
           loadingId={loadingEpisode}
           onPlay={onEpisode}
           onClose={() => setEpisodes(false)}
+        />
+      )}
+
+      {playlist && (
+        <PlaylistSheet
+          open={listing}
+          playlist={playlist.id}
+          playing={item.Id!}
+          loadingId={loadingEpisode}
+          onPlay={(entry, id) => {
+            setListing(false);
+            if (entry.Id !== item.Id || id !== playlist.id)
+              playlist.onPlay(entry, id);
+          }}
+          onClose={() => setListing(false)}
         />
       )}
 

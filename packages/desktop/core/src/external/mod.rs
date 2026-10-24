@@ -211,6 +211,10 @@ impl External {
         self.with(|backend| backend.command(vec!["stop".into()]));
     }
 
+    pub fn unqueue(&self) {
+        self.with(|backend| backend.command(vec!["playlist-clear".into()]));
+    }
+
     pub fn change(&self, change: &Change) -> Result<(), String> {
         let props = playback::change(change)?;
         self.with(|backend| {
@@ -236,10 +240,14 @@ impl External {
         url: &str,
         title: &str,
         language: &str,
+        replace: Option<u64>,
         local: &dyn Fn(&str) -> bool,
     ) -> Result<(), String> {
         playback::check_url(url, local)?;
         self.with(|backend| {
+            if let Some(id) = replace {
+                backend.command(vec!["sub-remove".into(), id.to_string()]);
+            }
             backend.command(vec![
                 "sub-add".into(),
                 url.into(),

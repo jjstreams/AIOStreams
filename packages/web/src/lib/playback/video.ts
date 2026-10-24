@@ -107,7 +107,20 @@ export function videoEngine(
       const on = audioTracks.findIndex((t) => t.enabled);
       set({ audio: on < 0 ? null : String(on) });
     };
+    const onTrackLoad = () => {
+      placeCues();
+      shiftCues();
+    };
     const setSubtitle = (id: string | null) => {
+      const at = file?.subtitles.findIndex((s) => s.id === id) ?? -1;
+      const shown = elements[at];
+      if (shown && shown.readyState >= HTMLTrackElement.LOADED) {
+        const fresh = shown.cloneNode() as HTMLTrackElement;
+        fresh.addEventListener('load', onTrackLoad);
+        shown.removeEventListener('load', onTrackLoad);
+        shown.replaceWith(fresh);
+        elements[at] = fresh;
+      }
       elements.forEach((e, i) => {
         e.track.mode = file?.subtitles[i]?.id === id ? 'showing' : 'disabled';
       });
@@ -143,11 +156,14 @@ export function videoEngine(
           el.volume = Math.min(1, next.volume.volume);
           el.muted = next.volume.muted;
         }
-        const buffered = () =>
-          Array.from({ length: el.buffered.length }, (_, i) => ({
-            startMs: el.buffered.start(i) * 1000,
-            endMs: el.buffered.end(i) * 1000,
+        // Each read is a new snapshot, whose ranges may have merged since the last.
+        const buffered = () => {
+          const ranges = el.buffered;
+          return Array.from({ length: ranges.length }, (_, i) => ({
+            startMs: ranges.start(i) * 1000,
+            endMs: ranges.end(i) * 1000,
           }));
+        };
         const handlers: Record<string, () => void> = {
           loadedmetadata: () => {
             if (next.startMs) el.currentTime = next.startMs / 1000;
@@ -187,10 +203,6 @@ export function videoEngine(
         const audioEvents = ['addtrack', 'removetrack', 'change'];
         for (const event of audioEvents)
           audio?.addEventListener(event, listTracks);
-        const onTrackLoad = () => {
-          placeCues();
-          shiftCues();
-        };
         for (const e of elements) e.addEventListener('load', onTrackLoad);
         const onFullscreen = () => set({ fullscreen: isFullscreen() });
         document.addEventListener('fullscreenchange', onFullscreen);

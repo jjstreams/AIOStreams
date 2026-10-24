@@ -37,6 +37,11 @@ pub enum Inbound {
         #[serde(default)]
         external: bool,
     },
+    /// Drops the files queued after the playing one.
+    PlayerUnqueue {
+        #[serde(default)]
+        external: bool,
+    },
     PlayerSet {
         #[serde(flatten)]
         change: Change,
@@ -48,11 +53,12 @@ pub enum Inbound {
         #[serde(default)]
         external: bool,
     },
-    /// Adds a subtitle from the server and shows it.
+    /// Adds a subtitle from the server and shows it, in place of track `replace`.
     PlayerSubtitleAdd {
         url: String,
         title: String,
         language: String,
+        replace: Option<u64>,
         #[serde(default)]
         external: bool,
     },

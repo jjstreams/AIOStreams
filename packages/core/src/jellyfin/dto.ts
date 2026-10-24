@@ -16,6 +16,7 @@ import {
   encodeItemId,
   genreId,
   personId,
+  PLAYLISTS_FOLDER_ID,
   resolveMarkerId,
   sharedEpisodeId,
   studioId,
@@ -91,11 +92,18 @@ export function isUnairedEpisode(item: JellyfinItem): boolean {
   return !!(item as { _aio?: { unaired?: boolean } })._aio?.unaired;
 }
 
+export function airTimeOf(video: {
+  released?: string | null;
+  airsAfter?: number;
+}): number {
+  const at = video.released ? Date.parse(video.released) : NaN;
+  return Number.isFinite(at) ? at : (video.airsAfter ?? NaN);
+}
+
 export function isUnairedVideo(video: SeasonGroup['videos'][number]): boolean {
-  const premiere = toIso(video.released);
   return (
     (video as { available?: unknown }).available === false ||
-    (premiere ? new Date(premiere).getTime() > Date.now() : false)
+    airTimeOf(video) > Date.now()
   );
 }
 
@@ -127,11 +135,10 @@ export function defaultUserData(itemId: string): UserItemDataDto {
 
 /** Unaired episodes never count towards a played state, as in Jellyfin. */
 export function hasAired(
-  video: { released?: string | null },
+  video: { released?: string | null; airsAfter?: number },
   now: number
 ): boolean {
-  const at = video.released ? Date.parse(video.released) : NaN;
-  return !(at > now);
+  return !(airTimeOf(video) > now);
 }
 
 /** An empty count is not played: every episode is still to air. */
@@ -358,6 +365,49 @@ export function buildView(
   };
 }
 
+export function buildPlaylistsFolder(ctx: ItemBuildContext): JellyfinItem {
+  return {
+    ...baseItem(
+      ctx,
+      PLAYLISTS_FOLDER_ID,
+      'Playlists',
+      'ManualPlaylistsFolder',
+      true
+    ),
+    CollectionType: 'playlists',
+    DisplayPreferencesId: PLAYLISTS_FOLDER_ID,
+    Path: '/aiostreams/playlists',
+  };
+}
+
+export function buildPlaylist(
+  ctx: ItemBuildContext,
+  playlist: {
+    id: string;
+    name: string;
+    count: number;
+    createdAt: number;
+    updatedAt: number;
+  },
+  images: ItemImages = {}
+): JellyfinItem {
+  rememberImages(playlist.id, images);
+  return {
+    ...baseItem(ctx, playlist.id, playlist.name, 'Playlist', true),
+    ...imageTagsFor(images),
+    MediaType: 'Video',
+    CanDelete: true,
+    DateCreated: new Date(playlist.createdAt).toISOString(),
+    DateLastMediaAdded: new Date(playlist.updatedAt).toISOString(),
+    ChildCount: playlist.count,
+    RecursiveItemCount: playlist.count,
+    ParentId: PLAYLISTS_FOLDER_ID,
+    DisplayPreferencesId: playlist.id,
+    Path: `/aiostreams/playlists/${playlist.id}`,
+    PrimaryImageAspectRatio: 0.6666,
+  };
+}
+
 export function buildGenre(
   ctx: ItemBuildContext,
   type: string,
@@ -430,18 +480,34 @@ export interface LeafEvidence {
   guess?: (entry: { id: string; type: string }) => boolean;
 }
 
+function defaultsToEpisode(
+  entry: { type: string; videos?: unknown },
+  videoId: string
+): boolean {
+  const own = Array.isArray(entry.videos)
+    ? (
+        entry.videos as { id?: unknown; season?: unknown; episode?: unknown }[]
+      ).find((v) => v?.id === videoId)
+    : undefined;
+  if (own)
+    return typeof own.season === 'number' && typeof own.episode === 'number';
+  return !!IdParser.parse(videoId, entry.type)?.episode;
+}
+
 /**
  * Whether an entry plays on its own, the way Stremio decides it: the
- * `defaultVideoId` hint wins, then a meta with no videos is itself the video.
+ * `defaultVideoId` hint wins unless it is one of the entry's episodes, which
+ * opens the show on it, then a meta with no videos is itself the video.
  * A list only has previews, so the evidence answers that second question.
  */
 export function isLeafEntry(
-  entry: { id: string; type: string; collection?: unknown },
+  entry: { id: string; type: string; collection?: unknown; videos?: unknown },
   evidence?: LeafEvidence
 ): boolean {
   if (entry.collection) return false;
   if (entry.type === 'movie') return true;
-  if (defaultVideoIdOf(entry)) return true;
+  const video = defaultVideoIdOf(entry);
+  if (video) return !defaultsToEpisode(entry, video);
   if (evidence?.decided.has(entry.type)) return evidence.leaves.has(entry.type);
   return evidence?.guess?.(entry) ?? false;
 }
@@ -589,7 +655,10 @@ export function buildContentItem(
 export interface SeasonGroup {
   season: number;
   name: string;
-  videos: NonNullable<ParsedMeta['videos']>;
+  videos: (NonNullable<ParsedMeta['videos']>[number] & {
+    /** An undated episode airs no earlier than the episodes before it. */
+    airsAfter?: number;
+  })[];
 }
 
 /** Groups `videos[]` by season; unnumbered videos become episode 1..n of season 1. */
@@ -624,11 +693,21 @@ export function groupSeasons(
   });
   for (const g of groups.values())
     g.videos.sort((a, b) => (a.episode ?? 0) - (b.episode ?? 0));
-  return [...groups.values()].sort((a, b) => {
+  const sorted = [...groups.values()].sort((a, b) => {
     if (a.season === 0) return 1;
     if (b.season === 0) return -1;
     return a.season - b.season;
   });
+  let latest: number | undefined;
+  for (const g of sorted) {
+    if (g.season === 0) continue;
+    for (const v of g.videos) {
+      const at = v.released ? Date.parse(v.released) : NaN;
+      if (Number.isFinite(at)) latest = Math.max(latest ?? at, at);
+      else if (latest !== undefined) v.airsAfter = latest;
+    }
+  }
+  return sorted;
 }
 
 export function episodeDescriptor(

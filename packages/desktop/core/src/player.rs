@@ -385,10 +385,14 @@ impl Player {
         url: &str,
         title: &str,
         language: &str,
+        replace: Option<u64>,
         local: &dyn Fn(&str) -> bool,
     ) -> Result<(), String> {
         playback::check_url(url, local)?;
         log::info!("add subtitle url={url}");
+        if let Some(id) = replace {
+            self.send(Request::Command(vec!["sub-remove".into(), id.to_string()]));
+        }
         self.send(Request::Command(vec![
             "sub-add".into(),
             url.into(),
@@ -586,6 +590,10 @@ impl Player {
     pub fn stop(&self) {
         self.send(Request::Command(vec!["stop".into()]));
         self.previews.clear();
+    }
+
+    pub fn unqueue(&self) {
+        self.send(Request::Command(vec!["playlist-clear".into()]));
     }
 
     pub fn thumbnail(
