@@ -2,11 +2,10 @@ import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import React from 'react';
 import { flushSync } from 'react-dom';
-import { BiInfoCircle, BiPlay, BiSolidStar } from 'react-icons/bi';
+import { BiInfoCircle, BiPlay } from 'react-icons/bi';
 import { Button } from '@aiostreams/ui/button';
 import { Skeleton } from '@aiostreams/ui/skeleton';
 import { cn } from '@aiostreams/ui/core/styling';
-import { useMediaQuery } from '@aiostreams/ui/hooks/media-query';
 import { useSession } from '../lib/session';
 import { currentHost } from '../lib/hosts';
 import { usePageShown } from '../lib/page-shown';
@@ -17,6 +16,7 @@ import { backdropUrl, landscapeUrl, logoUrl } from '../lib/images';
 import { itemSubtitle, itemTitle, ticksToMs } from '../lib/format';
 import { itemPath, navigate } from '../lib/paths';
 import { useVersionPicker } from './version-picker';
+import { Scores, scoresOf } from './scores';
 import type { JellyfinClient } from '../lib/client';
 import type { BaseItemDto } from '../lib/types';
 import { pageRtl } from '../lib/direction';
@@ -250,15 +250,7 @@ function HeroDetails({
     item.Type === 'Episode'
       ? ['episode', itemSubtitle(item)]
       : ['year', item.ProductionYear],
-    [
-      'score',
-      item.CommunityRating ? (
-        <span className="inline-flex items-center gap-1">
-          <BiSolidStar className="text-yellow-400" />
-          {item.CommunityRating.toFixed(1)}
-        </span>
-      ) : null,
-    ],
+    ['score', scoresOf(item).length ? <Scores item={item} max={3} /> : null],
     ['genres', item.Genres?.slice(0, 3).join(', ')],
   ];
   const meta = parts.filter(([, part]) => part);
@@ -341,7 +333,7 @@ function HeroDetails({
   );
 }
 
-/** Fades the next or previous title in as far as a finger drags sideways over the hero. */
+/** Fades the next or previous title in as far as a finger or the mouse drags sideways over the hero. */
 function useSwipeFade(
   onLand: (step: 1 | -1) => void,
   onDragging: (dragging: boolean) => void
@@ -421,6 +413,18 @@ function useSwipeFade(
     if (d?.id !== e.pointerId) return;
     drag.current = null;
     if (!d.side) return;
+    if (e.pointerType === 'mouse') {
+      d.hero.style.userSelect = '';
+      // The click that ends a drag mustn't press what it ends over.
+      const swallow = (click: Event) => {
+        click.preventDefault();
+        click.stopPropagation();
+      };
+      window.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() =>
+        window.removeEventListener('click', swallow, { capture: true })
+      );
+    }
     const width = d.hero.clientWidth;
     const velocity = e.timeStamp - d.at > 100 ? 0 : d.velocity;
     const heading =
@@ -445,7 +449,9 @@ function useSwipeFade(
 
   return {
     onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
-      if (e.pointerType !== 'touch' || !e.isPrimary) return;
+      const mouse = e.pointerType === 'mouse';
+      if (!e.isPrimary || (mouse ? e.button !== 0 : e.pointerType !== 'touch'))
+        return;
       settle();
       drag.current = {
         id: e.pointerId,
@@ -471,6 +477,12 @@ function useSwipeFade(
           return;
         d.side = Math.sign(moved);
         latest.current.onDragging(true);
+        // A finger's pointer is held by the hero already; a mouse's leaves it.
+        if (e.pointerType === 'mouse') {
+          d.hero.setPointerCapture(e.pointerId);
+          d.hero.style.userSelect = 'none';
+          getSelection()?.removeAllRanges();
+        }
       }
       // Back past the start only undoes the fade.
       const dx = d.side < 0 ? Math.min(0, moved) : Math.max(0, moved);
@@ -482,6 +494,8 @@ function useSwipeFade(
     onPointerUp: (e: React.PointerEvent) => release(e, false),
     // A system gesture takes the pointer, so the fade is undone.
     onPointerCancel: (e: React.PointerEvent) => release(e, true),
+    // The mouse would carry off the artwork or a link instead.
+    onDragStart: (e: React.DragEvent) => e.preventDefault(),
   };
 }
 
@@ -515,10 +529,7 @@ export function Hero({
       step > 0 ? [main, next, prev] : [next, prev, main]
     );
   }, setDragging);
-  const swipeable =
-    useMediaQuery('(pointer: coarse)') &&
-    !currentHost().tv &&
-    featured.length > 1;
+  const swipeable = !currentHost().tv && featured.length > 1;
   const shown = usePageShown();
   const section = React.useRef<HTMLElement>(null);
   const [focused, setFocused] = React.useState(false);

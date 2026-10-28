@@ -18,11 +18,13 @@ import {
   MAX_FEATURED,
   type EpisodeLayout,
   type BarBackground,
+  type DesktopNavigation,
   type RailNames,
   type RailShape,
+  type TopBar,
+  type TabNames,
   type TouchNavigation,
   type TvNavigation,
-  type TvTopBar,
   type HeroMode,
   type PosterLine,
   type PosterSize,
@@ -42,7 +44,11 @@ function NavigationCard() {
   const [tvNavigation, setTvNavigation] = useSetting(
     settings.interface.tvNavigation
   );
-  const [tvTopBar, setTvTopBar] = useSetting(settings.interface.tvTopBar);
+  const [desktopNavigation, setDesktopNavigation] = useSetting(
+    settings.interface.desktopNavigation
+  );
+  const [topBar, setTopBar] = useSetting(settings.interface.topBar);
+  const [tabNames, setTabNames] = useSetting(settings.interface.tabNames);
   const [railShape, setRailShape] = useSetting(settings.interface.railShape);
   const [railNames, setRailNames] = useSetting(settings.interface.railNames);
   const [background, setBackground] = useSetting(
@@ -51,8 +57,10 @@ function NavigationCard() {
   const rail = tv
     ? tvNavigation === 'rail'
     : touch && touchNavigation === 'rail';
+  const topTabs =
+    (tv ? tvNavigation : touch ? touchNavigation : desktopNavigation) === 'top';
   // A TV's docked rail and fade sit on nothing.
-  const onBar = !tv || (rail ? railShape !== 'docked' : tvTopBar !== 'fade');
+  const onBar = !tv || (rail ? railShape !== 'docked' : topBar !== 'fade');
   return (
     <SettingsCard
       name="navigation"
@@ -78,10 +86,25 @@ function NavigationCard() {
           options={[
             { value: 'rail', label: t`Side rail` },
             { value: 'bar', label: t`Bottom bar` },
+            { value: 'top', label: t`Top tabs` },
           ]}
           value={touchNavigation}
           onValueChange={(value) =>
             setTouchNavigation(value as TouchNavigation)
+          }
+        />
+      )}
+      {!tv && !touch && (
+        <Select
+          label={t`On wide screens`}
+          help={t`Where the navigation goes when the window is wide enough for a sidebar.`}
+          options={[
+            { value: 'sidebar', label: t`Sidebar` },
+            { value: 'top', label: t`Top tabs` },
+          ]}
+          value={desktopNavigation}
+          onValueChange={(value) =>
+            setDesktopNavigation(value as DesktopNavigation)
           }
         />
       )}
@@ -121,7 +144,7 @@ function NavigationCard() {
           onValueChange={(value) => setRailNames(value as RailNames)}
         />
       )}
-      {tv && tvNavigation === 'top' && (
+      {topTabs && (
         <Select
           label={t`Top bar`}
           help={t`How the tabs sit over the page: as floating pills, on a bar across the top, or on nothing but a fade down from the top edge.`}
@@ -130,8 +153,25 @@ function NavigationCard() {
             { value: 'bar', label: t`Bar` },
             { value: 'fade', label: t`Fade` },
           ]}
-          value={tvTopBar}
-          onValueChange={(value) => setTvTopBar(value as TvTopBar)}
+          value={topBar}
+          onValueChange={(value) => setTopBar(value as TopBar)}
+        />
+      )}
+      {/* Narrow screens other than a TV always have the bottom bar. */}
+      {(!tv || topTabs) && (
+        <Select
+          label={t`Tab names`}
+          help={
+            tv
+              ? t`Whether the tabs name each page beside its icon.`
+              : t`Whether the bar at the bottom, and tabs along the top, name each page.`
+          }
+          options={[
+            { value: 'shown', label: t`Shown` },
+            { value: 'hidden', label: t`Hidden` },
+          ]}
+          value={tabNames}
+          onValueChange={(value) => setTabNames(value as TabNames)}
         />
       )}
       {onBar && (
@@ -198,6 +238,10 @@ export function InterfaceSection() {
   const [episodeLayout, setEpisodeLayout] = useSetting(
     settings.interface.episodeLayout
   );
+  const [cardPreviews, setCardPreviews] = useSetting(
+    settings.interface.cardPreviews
+  );
+  const touch = !currentHost().tv && matchMedia('(pointer: coarse)').matches;
 
   const option = (value: string, label: string) => ({
     value,
@@ -304,6 +348,17 @@ export function InterfaceSection() {
           onValueChange={(value) => setPosterLines(value as PosterLine[])}
         />
       </SettingsCard>
+      {!touch && (
+        <SettingsCard name="cards" title={t`Cards`} description={onDevice()}>
+          <Switch
+            side="right"
+            label={t`Previews`}
+            help={t`A card you rest on grows into a bigger preview with its details, while the hero rotates.`}
+            value={cardPreviews}
+            onValueChange={setCardPreviews}
+          />
+        </SettingsCard>
+      )}
       <SettingsCard
         name="episodes"
         title={t`Episodes`}

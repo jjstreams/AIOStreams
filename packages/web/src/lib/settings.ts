@@ -24,11 +24,14 @@ export type EpisodeLayout = (typeof EPISODE_LAYOUTS)[number];
 export const HERO_MODES = ['rotate', 'follow', 'corner'] as const;
 export type HeroMode = (typeof HERO_MODES)[number];
 
-export const TOUCH_NAVIGATIONS = ['rail', 'bar'] as const;
+export const TOUCH_NAVIGATIONS = ['rail', 'bar', 'top'] as const;
 export type TouchNavigation = (typeof TOUCH_NAVIGATIONS)[number];
 
 export const TV_NAVIGATIONS = ['rail', 'top'] as const;
 export type TvNavigation = (typeof TV_NAVIGATIONS)[number];
+
+export const DESKTOP_NAVIGATIONS = ['sidebar', 'top'] as const;
+export type DesktopNavigation = (typeof DESKTOP_NAVIGATIONS)[number];
 
 export const RAIL_SHAPES = ['docked', 'floating', 'corner'] as const;
 export type RailShape = (typeof RAIL_SHAPES)[number];
@@ -36,8 +39,11 @@ export type RailShape = (typeof RAIL_SHAPES)[number];
 export const RAIL_NAMES = ['auto', 'always', 'never'] as const;
 export type RailNames = (typeof RAIL_NAMES)[number];
 
-export const TV_TOP_BARS = ['pill', 'bar', 'fade'] as const;
-export type TvTopBar = (typeof TV_TOP_BARS)[number];
+export const TOP_BARS = ['pill', 'bar', 'fade'] as const;
+export type TopBar = (typeof TOP_BARS)[number];
+
+export const TAB_NAMES = ['shown', 'hidden'] as const;
+export type TabNames = (typeof TAB_NAMES)[number];
 
 export const BAR_BACKGROUNDS = ['solid', 'frosted', 'liquid'] as const;
 export type BarBackground = (typeof BAR_BACKGROUNDS)[number];
@@ -703,6 +709,10 @@ export const settings = {
       EPISODE_LAYOUTS,
       ['aiostreams-web-episode-layout']
     ),
+    cardPreviews: device<boolean>(
+      'aiostreams-web-interface-card-previews',
+      true
+    ),
     /** Where a touch screen wide enough for the sidebar keeps the navigation. */
     touchNavigation: device<TouchNavigation>(
       'aiostreams-web-interface-touch-navigation',
@@ -716,6 +726,12 @@ export const settings = {
       'rail',
       TV_NAVIGATIONS,
       ['aiostreams-web-tv-navigation']
+    ),
+    /** Where a mouse-driven screen wide enough for the sidebar keeps the navigation. */
+    desktopNavigation: device<DesktopNavigation>(
+      'aiostreams-web-interface-desktop-navigation',
+      'sidebar',
+      DESKTOP_NAVIGATIONS
     ),
     /**
      * How a side rail sits: in a column of its own, floating over the page, or
@@ -734,12 +750,17 @@ export const settings = {
       RAIL_NAMES,
       ['aiostreams-web-rail-names']
     ),
-    /** How a TV's top tabs sit over the page. */
-    tvTopBar: device<TvTopBar>(
-      'aiostreams-web-interface-tv-top-bar',
+    /** How the top tabs sit over the page. */
+    topBar: device<TopBar>(
+      'aiostreams-web-interface-top-bar',
       'pill',
-      TV_TOP_BARS,
-      ['aiostreams-web-tv-top-bar']
+      TOP_BARS,
+      ['aiostreams-web-interface-tv-top-bar', 'aiostreams-web-tv-top-bar']
+    ),
+    tabNames: device<TabNames>(
+      'aiostreams-web-interface-tab-names',
+      'shown',
+      TAB_NAMES
     ),
     /** What the navigation bars over the page sit on. */
     barBackground: device<BarBackground>(
