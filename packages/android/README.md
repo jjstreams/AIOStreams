@@ -7,12 +7,12 @@ app's bridge as `window.aiostreamsApp`, so `src/lib/hosts/shell` in the web app 
 ## Building
 
 Needs JDK 17 or later (Android Studio's own works) and the Android SDK with platform 37.2, found
-through `ANDROID_HOME`. The Rust code in `packages/native` builds with rustup's toolchain, its Android
-targets and cargo-ndk:
+through `ANDROID_HOME`. The Rust code in `natives/rust` builds with rustup's toolchain, its Android
+targets and cargo-ndk, and cargo-about lists its crates' licences, which a build without it leaves out:
 
 ```sh
 rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-cargo install cargo-ndk
+cargo install cargo-ndk cargo-about
 ```
 
 ```sh
@@ -25,7 +25,7 @@ adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 Each build is an APK per processor (`arm64-v8a`, `armeabi-v7a`, `x86_64`). Debug builds install as
 `io.github.viren070.aiostreams.debug`, named "AIOStreams Debug", beside a released copy.
 
-libmpv comes from `libs.pin`: a release of [Viren070/aiostreams-libs](https://github.com/Viren070/aiostreams-libs),
+libmpv comes from `libs.pin`: a release of [AIOStreams/libs](https://github.com/AIOStreams/libs),
 which pins every source it builds, and the AAR's SHA-256. The `mpv` module downloads it and refuses one
 that hashes differently, so a new libmpv is a tag there, then its URL and hash here.
 
@@ -60,11 +60,12 @@ Keep a copy of the keystore: installed copies only update to builds signed with 
 | `app`         | The activity: the player's view, WebView, window state                       |
 | `bridge`      | The WebView setup, the bundled page's origin, and `window.aiostreamsApp`     |
 | `playback`    | The engine interface in mpv's terms, the page's allowlist, the `mpv-*` relay |
-| `mpv`         | libmpv                                                                       |
+| `libs`        | The libs AAR: libmpv, FFmpeg, libass and libdovi, from `libs.pin`            |
+| `mpv`         | The mpv engine                                                               |
 | `exoplayer`   | Media3 ExoPlayer, with libmpv's libass drawing ASS subtitles                 |
 | `downloads`   | The download queue and its foreground service                                |
-| `natives`     | The Rust library from `packages/native`, built with cargo-ndk                |
-| `build-logic` | Shared SDK levels, NDK, ABIs and Java version; the libmpv fetch, cargo-ndk   |
+| `natives`     | The Rust library in `natives/rust`, on AIOStreams/media's crates             |
+| `build-logic` | Shared SDK levels, NDK, ABIs and Java version; the libs fetch, cargo-ndk     |
 
 ## Debugging
 

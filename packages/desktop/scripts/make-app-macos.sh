@@ -16,7 +16,7 @@ cp -R "$desktop/../web/dist-standalone" "$app/Contents/Resources/web"
 cp "$desktop/THIRD-PARTY.md" "$app/Contents/Resources/"
 # From `cargo about`, when the caller generated it.
 if [ -f "$desktop/target/third-party-licenses.html" ]; then
-  cp "$desktop/target/third-party-licenses.html" "$app/Contents/Resources/"
+  cp "$desktop/target/third-party-licenses."{html,json} "$app/Contents/Resources/"
 fi
 
 # libmpv and the libraries it loads, which find each other through the app's run path.
@@ -25,6 +25,7 @@ if [ ! -f "$desktop/vendor/macos-$arch/libmpv.2.dylib" ]; then
   "$desktop/scripts/fetch-libs-macos.sh" "$arch"
 fi
 cp "$desktop/vendor/macos-$arch/"*.dylib "$app/Contents/Frameworks/"
+cp -R "$desktop/vendor/macos-$arch/licenses" "$app/Contents/Resources/"
 rpaths() { otool -l "$1" | awk '$2 == "LC_RPATH" { getline; getline; print $2 }'; }
 if ! rpaths "$app/Contents/MacOS/aiostreams-desktop" | grep -qxF '@executable_path/../Frameworks'; then
   echo "the app has no run path to its Frameworks" >&2

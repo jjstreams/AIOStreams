@@ -19,7 +19,7 @@ use aiostreams_desktop_core::downloads::{self, Downloads};
 use aiostreams_desktop_core::external::{self, External};
 use aiostreams_desktop_core::playback::{self, PlayerState};
 use aiostreams_desktop_core::player::Player;
-use aiostreams_desktop_core::{discord, now_playing, thumbnails};
+use aiostreams_desktop_core::{discord, licenses, now_playing, thumbnails};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use updates::{Command, Updater};
@@ -93,6 +93,20 @@ fn portable_root() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let root = exe.parent()?.parent()?;
     root.join(".portable").is_file().then(|| root.to_path_buf())
+}
+
+/// Beside the app or libmpv, or in a macOS bundle's Resources beside either.
+fn licence_dirs() -> Vec<PathBuf> {
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(PathBuf::from));
+    let libmpv = platform::libmpv_candidates()
+        .into_iter()
+        .filter_map(|p| p.parent().map(PathBuf::from));
+    exe.into_iter()
+        .chain(libmpv)
+        .flat_map(|dir| [dir.join("../Resources"), dir])
+        .collect()
 }
 
 fn web_dir(args: &Args) -> PathBuf {
@@ -337,6 +351,11 @@ pub fn start_player(
         ("config-dir", mpv_dir.to_string_lossy().into_owned()),
         ("config", "yes".into()),
         ("audio-client-name", "AIOStreams".into()),
+        // `%23%` quotes the next 23 characters, whose commas would split the option.
+        (
+            "stream-lavf-o",
+            "reconnect=1,reconnect_on_http_error=%23%408,429,500,502,503,504,reconnect_delay_max=15".into(),
+        ),
     ];
     defaults.extend(platform::mpv_options(video));
     let defaults: Vec<(&str, &str)> = defaults.iter().map(|(k, v)| (*k, v.as_str())).collect();
@@ -696,6 +715,7 @@ pub fn handle(
             );
             emit(Outbound::Diagnostics { text });
         }
+        Inbound::Licenses => emit(Outbound::Licenses(licenses::read(&licence_dirs()))),
         Inbound::UpdateCheck { channel } => match updater {
             Some(updater) => updater.send(Command::Check(channel)),
             None => emit(Outbound::UpdateState {
