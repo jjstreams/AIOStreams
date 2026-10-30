@@ -19,7 +19,7 @@ import {
   SUBTITLE_DELAY_LIMIT_MS,
 } from '../subtitles/delay';
 import { subtitleUrl, textSubtitles } from '../subtitles/tracks';
-import { subtitleHeight } from '../subtitles/style';
+import { SUBTITLE_LIFT_MS, subtitleHeight } from '../subtitles/style';
 import type { MediaStream, SourceInfo } from '../types';
 import { useLatest } from '../use-latest';
 import type { Chapter } from './chapters';
@@ -55,7 +55,8 @@ const EARLY_END_MS = 30_000;
 /** Late enough after the start that reading the file's index for thumbnails doesn't slow it. */
 const THUMBNAIL_INDEX_MS = 5_000;
 
-const LIFT_MS = 300;
+/** How long subtitles stay at a newly picked height while the controls show. */
+const PLACING_MS = 3_000;
 
 function serverSubtitles(
   client: JellyfinClient,
@@ -296,36 +297,62 @@ export function usePlayer(
   };
 
   const { subtitleStyle } = opts;
-  // Subtitles slide to a new lift, in the controls' time, rather than jump.
-  const shownLift = React.useRef(lift);
+  // A new subtitle height shows where it puts them for a while, under the
+  // controls too, which would otherwise keep them above it.
+  const position = subtitleStyle?.position;
+  const [placing, setPlacing] = React.useState(false);
+  const placedAt = React.useRef(position);
+  React.useEffect(() => {
+    if (position === placedAt.current) return;
+    placedAt.current = position;
+    setPlacing(true);
+    const timer = setTimeout(() => setPlacing(false), PLACING_MS);
+    return () => clearTimeout(timer);
+  }, [position]);
+  const lifted = placing ? 0 : lift;
+
+  // Subtitles slide to a new height, in the controls' time, rather than jump:
+  // a new one every frame, which the players move to at once.
+  const height = subtitleHeight(subtitleStyle, lifted);
+  const shownHeight = React.useRef(height);
   React.useEffect(() => {
     if (!engine.setStyle) return;
     const set = engine.setStyle;
-    const from = shownLift.current;
+    const from = shownHeight.current;
     if (
-      from === lift ||
+      from === height ||
       matchMedia('(prefers-reduced-motion: reduce)').matches
     ) {
-      shownLift.current = lift;
-      set({ subtitleStyle, fit, lift });
+      shownHeight.current = height;
+      set({ subtitleStyle, fit, height });
       return;
     }
     const start = performance.now();
-    let sent: number | null = null;
     let frame = requestAnimationFrame(function step(now) {
-      const done = Math.min(1, (now - start) / LIFT_MS);
-      const value = from + (lift - from) * (1 - (1 - done) ** 3);
-      shownLift.current = value;
-      // The players place subtitles by whole percents.
-      const height = subtitleHeight(subtitleStyle, value);
-      if (height !== sent) {
-        sent = height;
-        set({ subtitleStyle, fit, lift: value });
-      }
+      const done = Math.min(1, (now - start) / SUBTITLE_LIFT_MS);
+      const value = from + (height - from) * (1 - (1 - done) ** 3);
+      shownHeight.current = value;
+      set({ subtitleStyle, fit, height: value });
       if (done < 1) frame = requestAnimationFrame(step);
     });
     return () => cancelAnimationFrame(frame);
-  }, [engine, subtitleStyle, fit, lift]);
+  }, [engine, subtitleStyle, fit, height]);
+
+  // The controls lift the subtitles exactly while they show; hiding, both
+  // still move for a while.
+  const controlsShown = lift > 0;
+  React.useEffect(() => {
+    if (controlsShown) {
+      engine.showControls?.(true);
+      return;
+    }
+    const timer = setTimeout(
+      () => engine.showControls?.(false),
+      SUBTITLE_LIFT_MS + 100
+    );
+    return () => clearTimeout(timer);
+  }, [engine, controlsShown]);
+  React.useEffect(() => () => engine.showControls?.(false), [engine]);
 
   React.useEffect(() => {
     setRetry(undefined);
@@ -529,6 +556,7 @@ export function usePlayer(
         .map((t) => ({ ...asTrack(t), facts: trackFacts(t) })),
     ],
     subtitleText,
+    subtitleLift: lifted,
     thumbnails,
     togglePlay: () => engine.setPaused(!live.current.paused),
     setPaused: (paused) => engine.setPaused(paused),
@@ -557,7 +585,8 @@ export function usePlayer(
         patch({ subtitleDelayMs: delay });
       }),
     skipAhead: engine.skipAhead && ((skips) => engine.skipAhead!(skips)),
-    liftSubtitles: engine.setStyle && setLift,
+    // Also for players without styles: the page lifts the subtitle it draws for them.
+    liftSubtitles: setLift,
     canReadSubtitle: (id) =>
       servers.some((s) => s.id === id) || !!engine.ownText?.(id),
     subtitleLines: async () => {
