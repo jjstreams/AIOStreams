@@ -56,6 +56,7 @@ import { Volume } from './volume';
 import { usePlayhead, type Playhead } from '../../lib/playback/playhead';
 
 const IDLE_MS = 5000;
+const BRIEF_IDLE_MS = 1500;
 
 /** Presses closer than this are a held key's repeats. */
 const HELD_GAP_MS = 250;
@@ -108,7 +109,7 @@ export function PlayerControls({
   const tv = !!currentHost().tv;
   const root = React.useRef<HTMLDivElement>(null);
   const bottomBar = React.useRef<HTMLDivElement>(null);
-  const { idle, hidden, wake, hide } = useIdle(IDLE_MS);
+  const { idle, hidden, wake, hide, soon, brief } = useIdle(IDLE_MS);
   // Some TVs' web views report a coarse pointer.
   const [touch, setTouch] = React.useState(
     () => !tv && matchMedia('(pointer: coarse)').matches
@@ -162,6 +163,12 @@ export function PlayerControls({
   React.useEffect(() => {
     if (ready && !latest.current.state.paused) hide();
   }, [ready, latest, hide]);
+  const wasPaused = React.useRef<boolean | null>(null);
+  React.useEffect(() => {
+    if (!ready) return;
+    if (wasPaused.current && !state.paused) soon(BRIEF_IDLE_MS);
+    wasPaused.current = state.paused;
+  }, [ready, state.paused, soon]);
   useWindowButtons(visible);
   useFocusInside(root, visible, wake);
   useLiftSubtitles(player, bottomBar, visible);
@@ -180,6 +187,7 @@ export function PlayerControls({
   };
 
   const [seekStep] = useSetting(settings.controls.seekStep);
+  const [clock] = useSetting(settings.controls.clock);
   const [burstSeek, seekingTo] = useBurstSeek(player);
   const [seekPicture, setSeekPicture] = React.useState(true);
   const seekBy = (deltaMs: number, picture = true) => {
@@ -204,7 +212,8 @@ export function PlayerControls({
     const last = scrubbing.current;
     if (!last && !(thumbnails?.row() && (repeat || state.paused))) {
       if (seekingTo === null) skippedFrom.current = playhead.positionMs;
-      return seekBy(deltaMs * steps, false);
+      seekBy(deltaMs * steps, false);
+      return false;
     }
     if (!last && !state.paused) togglePlay();
     const fromMs =
@@ -220,6 +229,7 @@ export function PlayerControls({
       resume: last ? last.resume : !state.paused,
     };
     setScrub(scrubbing.current);
+    return true;
   };
   /** Plays from a remote's scrub, or drops it; false without one. */
   const endScrub = (commit: boolean) => {
@@ -320,11 +330,19 @@ export function PlayerControls({
     ready,
     visible,
     wake,
+    glance: () => {
+      wake();
+      soon(BRIEF_IDLE_MS);
+    },
+    glancing: () => brief.current,
     hide,
     notice: showNotice,
     togglePlay,
-    seekBy: (deltaMs, held) =>
-      tv ? remoteStep(deltaMs, held) : seekBy(deltaMs, false),
+    seekBy: (deltaMs, held) => {
+      if (tv) return remoteStep(deltaMs, held);
+      seekBy(deltaMs, false);
+      return false;
+    },
     endScrub,
     onBack,
     onPrevious,
@@ -489,11 +507,12 @@ export function PlayerControls({
             </p>
           )}
         </div>
+        {clock && <PlayerClock />}
         {touch && !tv && (
           <ControlButton
             name="lock"
             label={t`Lock screen`}
-            className="ms-auto"
+            className={clock ? undefined : 'ms-auto'}
             onClick={() => {
               setLocked(true);
               hide();
@@ -854,6 +873,30 @@ function PlayerTime({
         <span className="text-gray-400"> / {clock(durationMs)}</span>
       )}
     </button>
+  );
+}
+
+function PlayerClock() {
+  const [now, setNow] = React.useState(() => new Date());
+  React.useEffect(() => {
+    let timer = 0;
+    const next = () => {
+      setNow(new Date());
+      timer = window.setTimeout(next, 60_000 - (Date.now() % 60_000));
+    };
+    timer = window.setTimeout(next, 60_000 - (Date.now() % 60_000));
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <p
+      data-ui="player-clock"
+      className="ms-auto whitespace-nowrap text-[length:var(--title)] font-semibold tabular-nums"
+    >
+      {now.toLocaleTimeString(formatLocale(), {
+        hour: 'numeric',
+        minute: '2-digit',
+      })}
+    </p>
   );
 }
 

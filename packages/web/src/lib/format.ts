@@ -1,5 +1,6 @@
 import { t } from '@lingui/core/macro';
 import { formatLocale } from './i18n';
+import { settings } from './settings';
 import type { BaseItemDto } from './types';
 
 export const TICKS_PER_MS = 10_000;
@@ -129,9 +130,31 @@ export function unavailableKind(
   return Number.isNaN(at) || at > Date.now() ? 'unaired' : 'missing';
 }
 
+/** A playable episode yet to air, unless the setting treats it as aired. */
+export const airsLater = (item: BaseItemDto) =>
+  settings.next.markUnaired.read() &&
+  item.Type === 'Episode' &&
+  item.LocationType !== 'Virtual' &&
+  !!item.PremiereDate &&
+  Date.parse(item.PremiereDate) > Date.now();
+
+export const isUnaired = (item: BaseItemDto) =>
+  unavailableKind(item) === 'unaired' || airsLater(item);
+
+/** What the app may pick by itself, such as the next episode to play. */
+export const pickable = (item: BaseItemDto) =>
+  !unavailableKind(item) && !airsLater(item);
+
 export function unavailableLabel(item: BaseItemDto): string | null {
   const kind = unavailableKind(item);
   return kind === 'unaired' ? t`Unaired` : kind && t`Missing`;
+}
+
+/** A title no addon has details for, which the server names by its id. */
+export function lacksDetails(item: BaseItemDto): boolean {
+  return (
+    (item as { aiostreams?: { noMeta?: boolean } }).aiostreams?.noMeta === true
+  );
 }
 
 export type EpisodeMark = 'filler' | 'recap';
@@ -151,7 +174,7 @@ export const markLabel = (mark: EpisodeMark) =>
 
 /** `20 Jan 2008` */
 export function shortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(formatLocale(), {
+  return airDay(iso).toLocaleDateString(formatLocale(), {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
@@ -204,6 +227,15 @@ export function untilLabel(iso: string): string {
   return days < 14
     ? format.format(days, 'day')
     : format.format(Math.round(days / 7), 'week');
+}
+
+export function airedLabel(item: BaseItemDto): string {
+  const date = item.PremiereDate;
+  if (!date) return '';
+  if (!isUnaired(item)) return shortDate(date);
+  const day = dayLabel(date);
+  const until = untilLabel(date);
+  return t`Airs ${day} · ${until}`;
 }
 
 /** Whole years from one date to another, or to today. */

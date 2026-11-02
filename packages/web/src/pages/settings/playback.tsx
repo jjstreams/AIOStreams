@@ -40,7 +40,7 @@ import {
 import { useFeature } from '../../lib/server-info';
 import { SettingsCard, SettingsRow } from '../../components/settings-card';
 import { BadgesRow, QuickFiltersRow } from '../../components/version-settings';
-import { onDevice, followsYou } from './common';
+import { onDevice, followsYou, seconds } from './common';
 import { ReactionSetting } from '../../components/party/reaction-setting';
 
 const nextPromptHelp = (prompt: NextPrompt) =>
@@ -68,9 +68,6 @@ const segmentActionLabel = (action: SegmentAction) =>
     skip: t`Skip automatically`,
     none: t`Do nothing`,
   })[action];
-
-const seconds = (count: number) =>
-  plural(count, { one: '# second', other: '# seconds' });
 
 const minutes = (count: number) =>
   plural(count, { one: '# minute', other: '# minutes' });
@@ -101,6 +98,10 @@ export function PlaybackSection() {
   const [volumeStep, setVolumeStep] = useSetting(settings.controls.volumeStep);
   const [holdRate, setHoldRate] = useSetting(settings.controls.holdRate);
   const [thumbnails, setThumbnails] = useSetting(settings.controls.thumbnails);
+  const [clock, setClock] = useSetting(settings.controls.clock);
+  const [showOnPauseAndSkip, setShowOnPauseAndSkip] = useSetting(
+    settings.controls.showOnPauseAndSkip
+  );
   const [autoPlay, setAutoPlay] = useSetting(settings.playback.autoPlayFirst);
   const [preload, setPreload] = useSetting(settings.playback.preloadVersions);
   const [nextPrompt, setNextPrompt] = useSetting(settings.next.prompt);
@@ -114,6 +115,7 @@ export function PlaybackSection() {
   );
   const [skipFillers, setSkipFillers] = useSetting(settings.next.skipFillers);
   const [skipRecaps, setSkipRecaps] = useSetting(settings.next.skipRecaps);
+  const [markUnaired, setMarkUnaired] = useSetting(settings.next.markUnaired);
   const marked = useFeature('fillers');
   const [partyMessages, setPartyMessages] = useSetting(settings.party.messages);
   const [partyReactions, setPartyReactions] = useSetting(
@@ -255,6 +257,13 @@ export function PlaybackSection() {
             onValueChange={setSkipRecaps}
           />
         )}
+        <Switch
+          side="right"
+          label={t`Mark unaired episodes`}
+          help={t`Episodes that haven't aired yet show as unaired, ask before playing, and are passed over when playing on or downloading a season. Turn off if their air dates are often wrong.`}
+          value={markUnaired}
+          onValueChange={setMarkUnaired}
+        />
         {autoplay && (
           <Select
             label={t`Ask if you are still watching`}
@@ -354,6 +363,20 @@ export function PlaybackSection() {
           }))}
           value={String(holdRate)}
           onValueChange={(v) => setHoldRate(Number(v))}
+        />
+        <Switch
+          side="right"
+          label={t`Show the controls on pause and skip`}
+          help={t`Pausing, playing or skipping with a remote or the keyboard brings the controls up, for a moment after a skip. Turned off, only a brief icon shows.`}
+          value={showOnPauseAndSkip}
+          onValueChange={setShowOnPauseAndSkip}
+        />
+        <Switch
+          side="right"
+          label={t`Show the time`}
+          help={t`Shows the time of day at the top of the player with the controls.`}
+          value={clock}
+          onValueChange={setClock}
         />
         {shell && (
           <Switch
