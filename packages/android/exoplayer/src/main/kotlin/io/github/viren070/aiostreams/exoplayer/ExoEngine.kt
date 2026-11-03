@@ -30,6 +30,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
@@ -94,7 +95,21 @@ class ExoEngine(private val context: Context) : Engine {
     private val audio = AudioOutput()
     private val tracks = ExoTracks()
     private val events = Events()
+    private val selector = object : DefaultTrackSelector(context) {
+        /** Media3 seeks the playing file when the output changes, and throws if there is none. */
+        @Volatile
+        var tracksKnown = false
+
+        init {
+            setParameters(buildUponParameters().setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true))
+        }
+
+        override fun onRendererCapabilitiesChanged(renderer: Renderer) {
+            if (tracksKnown) super.onRendererCapabilitiesChanged(renderer)
+        }
+    }
     private val player = ExoPlayer.Builder(context, Renderers(context, audio), DefaultMediaSourceFactory(data, Extractors(Reading())))
+        .setTrackSelector(selector)
         // The app keeps audio focus and pauses for noise itself.
         .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), false)
         .setHandleAudioBecomingNoisy(false)
@@ -174,6 +189,7 @@ class ExoEngine(private val context: Context) : Engine {
     override fun stop() = post {
         if (url == null) return@post
         url = null
+        selector.tracksKnown = false
         player.stop()
         player.clearMediaItems()
         cache.play(null)
@@ -249,6 +265,8 @@ class ExoEngine(private val context: Context) : Engine {
         audio.setSettings(settings)
         cache.limitMb = settings.cacheMb
     }
+
+    override val checksOutput = true
 
     override fun setDolbyVision(on: Boolean) {
         useDolbyVision = on
@@ -330,6 +348,7 @@ class ExoEngine(private val context: Context) : Engine {
     }
 
     private fun open(request: LoadRequest) {
+        selector.tracksKnown = false
         if (url != null) listener?.onEnded("stop", null, null)
         http.setDefaultRequestProperties(request.headers)
         link.setDefaultRequestProperties(request.headers)
@@ -339,6 +358,7 @@ class ExoEngine(private val context: Context) : Engine {
         caps = MediaCaps.read(context)
         dolbyVision = null
         audioTrack = null
+        decoders.clear()
         loaded = false
         chosen = false
         restarting = true
@@ -597,6 +617,7 @@ class ExoEngine(private val context: Context) : Engine {
 
         override fun onTracksChanged(tracks: Tracks) {
             this@ExoEngine.tracks.update(tracks)
+            if (!tracks.isEmpty) selector.tracksKnown = true
             if (!chosen && !this@ExoEngine.tracks.isEmpty()) {
                 chosen = true
                 Failures.undecodable(tracks)?.let { error ->
@@ -619,6 +640,7 @@ class ExoEngine(private val context: Context) : Engine {
 
         override fun onPlayerError(error: PlaybackException) {
             url = null
+            selector.tracksKnown = false
             Log.w(TAG, "playback failed", error)
             state(PlayerState(idle = true))
             // mpv can't load a link that failed to either; anything else it may well play.
@@ -662,7 +684,9 @@ class ExoEngine(private val context: Context) : Engine {
 
         override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
             audioTrack = audioTrackConfig
-            state(PlayerState(passthrough = !Util.isEncodingLinearPcm(audioTrackConfig.encoding)))
+            val passthrough = !Util.isEncodingLinearPcm(audioTrackConfig.encoding)
+            if (passthrough) decoders.remove("audio")
+            state(PlayerState(passthrough = passthrough))
         }
     }
 

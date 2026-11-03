@@ -3,6 +3,7 @@ package io.github.viren070.aiostreams.exoplayer.audio
 import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.AudioSink
@@ -26,10 +27,12 @@ internal class AudioOutput {
             .setEnableAudioOutputPlaybackParameters(enablePlaybackParameters)
             .setAudioProcessors(arrayOf(SoundProcessor(levels)))
             .build()
-        ac3 = Ac3Sink(sink, levels)
+        ac3 = Ac3Sink(TrueHdSink(sink), levels)
         output = OutputSink(ac3)
         return output
     }
+
+    fun decodesForSpeed(format: Format) = output.decodesForSpeed(format)
 
     fun setSettings(settings: PlayerSettings) {
         output.setSpdif(settings.passthrough)
