@@ -7,6 +7,7 @@ import {
   LuLoaderCircle,
   LuLock,
   LuPause,
+  LuPictureInPicture2,
   LuPlay,
   LuRotateCcw,
   LuRotateCw,
@@ -30,6 +31,7 @@ import {
   MiddleButton,
   PlayerAction,
 } from './buttons';
+import { BarWindowButtons, pageDrawsWindowButtons } from '../window-controls';
 import { ChaptersSheet } from './chapters';
 import { EpisodesSheet } from './episodes';
 import { PlaylistSheet } from '../playlists';
@@ -76,6 +78,7 @@ export function PlayerControls({
   player,
   segments: segmentItems,
   onBack,
+  onMinimise,
   onVersions,
   onPrevious,
   onNext,
@@ -91,6 +94,7 @@ export function PlayerControls({
   player: PlayerController;
   segments: MediaSegmentDto[] | null | undefined;
   onBack(): void;
+  onMinimise?: () => void;
   onVersions?: () => void;
   onPrevious?: () => void;
   onNext?: () => void;
@@ -507,20 +511,41 @@ export function PlayerControls({
             </p>
           )}
         </div>
-        {clock && <PlayerClock />}
-        {touch && !tv && (
-          <ControlButton
-            name="lock"
-            label={t`Lock screen`}
-            className={clock ? undefined : 'ms-auto'}
-            onClick={() => {
-              setLocked(true);
-              hide();
-            }}
-          >
-            <LuLock />
-          </ControlButton>
-        )}
+        <div
+          data-ui="player-top-end"
+          className="ms-auto flex items-center gap-3"
+        >
+          {clock && <PlayerClock />}
+          {onMinimise && (
+            <ControlButton
+              name="mini-player"
+              label={t`Mini player`}
+              onClick={onMinimise}
+            >
+              <LuPictureInPicture2 />
+            </ControlButton>
+          )}
+          {touch && !tv && (
+            <ControlButton
+              name="lock"
+              label={t`Lock screen`}
+              onClick={() => {
+                setLocked(true);
+                hide();
+              }}
+            >
+              <LuLock />
+            </ControlButton>
+          )}
+          {pageDrawsWindowButtons() && !state.fullscreen && (
+            <div
+              data-ui="player-window-buttons"
+              className="flex items-center gap-1"
+            >
+              <BarWindowButtons />
+            </div>
+          )}
+        </div>
       </div>
 
       <div
