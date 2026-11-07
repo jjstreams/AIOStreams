@@ -74,10 +74,10 @@ export function keyboardFocus(): HTMLElement | null {
 
 export const overlayOpen = () => !!document.querySelector(OPEN_OVERLAY);
 
+/** A list that pops up from a page sits outside it, unlike the page's own lists. */
 export const inOverlay = (el: Element) =>
-  !!el.closest(
-    '[role=dialog], [role=alertdialog], [role=menu], [role=listbox]'
-  );
+  !!el.closest('[role=dialog], [role=alertdialog], [role=menu]') ||
+  (!!el.closest('[role=listbox]') && !el.closest('[data-page]'));
 
 const VERTICAL = ['ArrowUp', 'ArrowDown'];
 const HORIZONTAL = ['ArrowLeft', 'ArrowRight'];
@@ -491,17 +491,27 @@ function barGap(
   return gap >= -1 ? gap : null;
 }
 
-/** A `data-nav-wait` box, as a row still loading, lies that way before `to`. */
+/** Boxes still loading, kept here as a search of the page each move costs a TV dearly. */
+const loading = new Set<Element>();
+
+/** A ref for a box still loading, as a row, which a move that way waits for. */
+export function navWait(el: Element | null): (() => void) | undefined {
+  if (!el) return;
+  loading.add(el);
+  return () => void loading.delete(el);
+}
+
+/** A box still loading lies that way before `to`. */
 function waitsFor(
   root: Element,
   rect: DOMRect,
   to: HTMLElement | null,
   dir: Direction
 ): boolean {
-  const boxes = root.querySelectorAll('[data-nav-wait]');
-  if (!boxes.length) return false;
+  if (!loading.size) return false;
   const past = to && distance(rect, rectOf(to), dir);
-  for (const box of boxes) {
+  for (const box of loading) {
+    if (!root.contains(box)) continue;
     const way = distance(rect, settled(box, box.getBoundingClientRect()), dir);
     if (way?.inLine && (!past || way.gap < past.gap)) return true;
   }
@@ -845,7 +855,14 @@ export function move(dir: Direction): boolean {
   }
   // Any other way stays in such a box, as what it covers lies beside it.
   const within = exit && !out ? exit : root;
-  const near = back && canFocus(back) ? back : nearest(within, from, dir);
+  let near = back && canFocus(back) ? back : null;
+  // A box entered at its named element, as tabs at the picked one, has more of it to pass on the way back.
+  const entered = near && from.closest<HTMLElement>('[data-nav-enter]');
+  if (entered && !entered.contains(near)) {
+    const inside = nearest(within, from, dir);
+    if (inside && entered.contains(inside)) near = inside;
+  }
+  near ??= nearest(within, from, dir);
   const wait = waitsFor(within, rectOf(from), near, dir);
   bars = null;
   drifts = [];

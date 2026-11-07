@@ -1,7 +1,7 @@
 import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import React from 'react';
-import { BiCalendar, BiChevronRight, BiHistory } from 'react-icons/bi';
+import { BiCalendar, BiChevronRight, BiHistory, BiTv } from 'react-icons/bi';
 import { Button } from '@aiostreams/ui/button';
 import { Badge } from '@aiostreams/ui/badge';
 import { useMediaQuery } from '@aiostreams/ui/hooks/media-query';
@@ -15,6 +15,7 @@ import {
   useLibraryHeads,
   useNextUp,
   useResume,
+  useLiveTvView,
   useUpcoming,
   useViews,
 } from '../lib/queries';
@@ -43,6 +44,14 @@ import { useNear } from '../lib/use-in-view';
 import { FollowHero, Hero } from '../components/hero';
 import { CardPreviewHost } from '../components/card-preview';
 import { MediaRow } from '../components/media-row';
+import { ChannelCard } from '../components/channel-card';
+import {
+  FAVOURITES,
+  RECENT,
+  useChannelPages,
+  useNow,
+  useSchedules,
+} from '../lib/live-tv';
 import { PosterCard, WideCard } from '../components/cards';
 import { ItemMenu } from '../components/item-menu';
 import {
@@ -169,6 +178,7 @@ export function HomePage() {
           loading={nextUp.isLoading}
         />
       )}
+      <LiveRow />
       <UpcomingRow />
       {noCatalogs ? (
         <div className="flex flex-1 flex-col justify-center">
@@ -326,6 +336,55 @@ function UpcomingRow() {
 
 const ROW_PAGE = 20;
 
+/** Favourite channels, then those played here lately, with what is on. */
+function LiveRow() {
+  const view = useLiveTvView();
+  const enabled = !!view.data;
+  const favourites = useChannelPages(FAVOURITES, {
+    pageSize: ROW_PAGE,
+    enabled,
+  });
+  const recent = useChannelPages(RECENT, { enabled });
+  const channels = React.useMemo(() => {
+    const seen = new Set<string>();
+    return [favourites.data, recent.data]
+      .flatMap((data) => data?.pages.flatMap((p) => p.Items ?? []) ?? [])
+      .filter((c) => !seen.has(c.Id!) && !!seen.add(c.Id!))
+      .slice(0, ROW_PAGE);
+  }, [favourites.data, recent.data]);
+  const schedules = useSchedules([channels.map((c) => c.Id!)]);
+  const now = useNow();
+  if (!enabled) return null;
+  return (
+    <MediaRow
+      id="live"
+      title={t`Live TV`}
+      shape="wide"
+      loading={favourites.isLoading || recent.isLoading}
+      action={
+        <Button
+          size="sm"
+          intent="gray-subtle"
+          className="rounded-full"
+          leftIcon={<BiTv />}
+          onClick={() => navigate(to.live())}
+        >
+          <Trans>All channels</Trans>
+        </Button>
+      }
+    >
+      {channels.map((channel) => (
+        <ChannelCard
+          key={channel.Id}
+          channel={channel}
+          programmes={schedules.get(channel.Id!)}
+          now={now}
+        />
+      ))}
+    </MediaRow>
+  );
+}
+
 /**
  * A library's row, fetched and drawn once near the screen and paged as it
  * scrolls. Its cards wait too when already fetched, as most rows are out of
@@ -340,10 +399,43 @@ function LibraryRow({ view, first }: { view: BaseItemDto; first: boolean }) {
     pageSize: ROW_PAGE,
     enabled: near,
   });
-  const items = pages.data?.pages.flatMap((p) => p.Items ?? []) ?? [];
+  const items = React.useMemo(
+    () => pages.data?.pages.flatMap((p) => p.Items ?? []) ?? [],
+    [pages.data]
+  );
   const landscape =
     items.length > 0 &&
     items.filter((i) => cardShape(i) === 'landscape').length > items.length / 2;
+  // Made again only with the items, as the row renders for its paging too.
+  const cards = React.useMemo(
+    () =>
+      near &&
+      items.map((item) => (
+        <ItemMenu key={item.Id} item={item}>
+          <PosterCard
+            href={href(itemPath(item))}
+            shape={landscape ? 'landscape' : cardShape(item)}
+            image={(width) =>
+              cardImages(
+                client,
+                item,
+                landscape ? 'landscape' : cardShape(item),
+                { maxWidth: width }
+              )
+            }
+            animated={animatedPosterOf(item)}
+            title={item.Name ?? ''}
+            subtitle={itemSubtitle(item)}
+            itemType={item.Type}
+            watched={item.UserData?.Played}
+            favourite={item.UserData?.IsFavorite}
+            unwatched={item.UserData?.UnplayedItemCount ?? undefined}
+            progress={progressOf(item)}
+          />
+        </ItemMenu>
+      )),
+    [near, items, landscape, client]
+  );
   const label = libraryLabel(view);
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = pages;
   const more = React.useCallback(() => {
@@ -373,31 +465,7 @@ function LibraryRow({ view, first }: { view: BaseItemDto; first: boolean }) {
       loadingMore={isFetchingNextPage}
       onEndReached={more}
     >
-      {near &&
-        items.map((item) => (
-          <ItemMenu key={item.Id} item={item}>
-            <PosterCard
-              href={href(itemPath(item))}
-              shape={landscape ? 'landscape' : cardShape(item)}
-              image={(width) =>
-                cardImages(
-                  client,
-                  item,
-                  landscape ? 'landscape' : cardShape(item),
-                  { maxWidth: width }
-                )
-              }
-              animated={animatedPosterOf(item)}
-              title={item.Name ?? ''}
-              subtitle={itemSubtitle(item)}
-              itemType={item.Type}
-              watched={item.UserData?.Played}
-              favourite={item.UserData?.IsFavorite}
-              unwatched={item.UserData?.UnplayedItemCount ?? undefined}
-              progress={progressOf(item)}
-            />
-          </ItemMenu>
-        ))}
+      {cards}
     </MediaRow>
   );
 }

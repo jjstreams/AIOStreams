@@ -20,8 +20,7 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.text.format.Formatter
 import android.util.Log
-import android.hardware.input.InputManager
-import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -30,9 +29,10 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.activity.BackEventCompat
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.SystemBarStyle
-import androidx.activity.addCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.Lifecycle
@@ -162,17 +162,15 @@ class MainActivity : ComponentActivity() {
             passthrough = passthrough::supported,
             trustedRoots = { trustedRoots },
         )
-        gamepads = hasGamepad()
-        getSystemService(InputManager::class.java).registerInputDeviceListener(controllers, null)
         val identity = AppIdentity(
             BuildConfig.VERSION_NAME,
             deviceName(),
             deviceId(),
             onTv(),
             voice.available,
-            gamepads,
             PictureInPicture.supported(this),
-            miniPlayer = !onTv(),
+            miniPlayer = true,
+            gamepadButtons = true,
         )
         bridge = AppBridge(web, app.origins, identity, ::onMessage)
         updater = Updater(this, ::askForNotifications) { bridge.send(it) }
@@ -181,12 +179,14 @@ class MainActivity : ComponentActivity() {
             this,
             pause = { player.change(Change(paused = true)) },
             resume = { player.change(Change(paused = false)) },
+            expectedDrop = frameRates::relinking,
         )
         player.start()
         player.session.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) = onPlayerChanged()
         })
         PlaybackService.player = player.session
+        PlaybackService.expectedDrop = frameRates::relinking
         // Connecting starts the service, which takes over the notification once playback starts.
         controller = MediaController.Builder(this, SessionToken(this, ComponentName(this, PlaybackService::class.java)))
             .buildAsync()
@@ -198,13 +198,38 @@ class MainActivity : ComponentActivity() {
 
         // The page's own Back closes what is open, leaves the player and goes back, and
         // says `exit` on its first page.
-        onBackPressedDispatcher.addCallback(this) {
-            when {
-                bridge.connected -> bridge.send(buildJsonObject { put("type", "back") })
-                web.canGoBack() -> web.goBack()
-                else -> finish()
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    bridge.connected -> bridge.send(buildJsonObject { put("type", "back") })
+                    web.canGoBack() -> web.goBack()
+                    else -> finish()
+                }
             }
-        }
+
+            override fun handleOnBackStarted(backEvent: BackEventCompat) {
+                bridge.send(buildJsonObject {
+                    put("type", "back-gesture")
+                    put("event", "start")
+                    put("fromRight", backEvent.swipeEdge == BackEventCompat.EDGE_RIGHT)
+                })
+            }
+
+            override fun handleOnBackProgressed(backEvent: BackEventCompat) {
+                bridge.send(buildJsonObject {
+                    put("type", "back-gesture")
+                    put("event", "move")
+                    put("progress", backEvent.progress)
+                })
+            }
+
+            override fun handleOnBackCancelled() {
+                bridge.send(buildJsonObject {
+                    put("type", "back-gesture")
+                    put("event", "cancel")
+                })
+            }
+        })
     }
 
     private fun onMessage(type: String, message: JsonObject) {
@@ -457,27 +482,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private var gamepads = false
-
-    private val controllers = object : InputManager.InputDeviceListener {
-        override fun onInputDeviceAdded(deviceId: Int) = update()
-        override fun onInputDeviceRemoved(deviceId: Int) = update()
-        override fun onInputDeviceChanged(deviceId: Int) = update()
-
-        private fun update() {
-            val now = hasGamepad()
-            if (now == gamepads) return
-            gamepads = now
-            bridge.send(buildJsonObject {
-                put("type", "gamepads")
-                put("connected", now)
-            })
-        }
-    }
-
-    /** As the web view counts gamepads: joystick devices. */
-    private fun hasGamepad() = InputDevice.getDeviceIds().any { id ->
-        InputDevice.getDevice(id)?.let { !it.isVirtual && it.supportsSource(InputDevice.SOURCE_JOYSTICK) } == true
+    private val buttons = GamepadButtons { input, down ->
+        bridge.send(buildJsonObject {
+            put("type", "gamepad")
+            put("input", input)
+            put("down", down)
+        })
     }
 
     /** Asked on the first download, whose progress shows in one, and before an update. */
@@ -538,6 +548,9 @@ class MainActivity : ComponentActivity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean =
         (started && mini.onTouch(event)) || super.dispatchTouchEvent(event)
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        (started && buttons.handle(event)) || super.dispatchKeyEvent(event)
+
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         mini.pictureInPicture(isInPictureInPictureMode)
@@ -562,7 +575,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         if (!started) return super.onDestroy()
-        getSystemService(InputManager::class.java).unregisterInputDeviceListener(controllers)
         updater.release()
         voice.release()
         Downloads.queue(this).send = null

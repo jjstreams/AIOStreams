@@ -131,8 +131,12 @@ interface PickerValue {
 
 const PickerContext = React.createContext<PickerValue | null>(null);
 
+const isLive = (item: BaseItemDto) =>
+  item.Type === 'TvChannel' || item.Type === 'Program';
+
+/** A channel or programme plays straight, in the version it last played. */
 const rememberedVersion = (item: BaseItemDto, startMs: number) =>
-  startMs > 0 ? lastVersions.get(item.Id!) : undefined;
+  startMs > 0 || isLive(item) ? lastVersions.get(item.Id!) : undefined;
 
 export function useStraightPlay(): (
   item: BaseItemDto,
@@ -140,7 +144,8 @@ export function useStraightPlay(): (
 ) => boolean {
   const [autoPlay] = useSetting(settings.playback.autoPlayFirst);
   return React.useCallback(
-    (item, startMs) => autoPlay || !!rememberedVersion(item, startMs),
+    (item, startMs) =>
+      autoPlay || isLive(item) || !!rememberedVersion(item, startMs),
     [autoPlay]
   );
 }

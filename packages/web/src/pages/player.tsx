@@ -2,7 +2,15 @@ import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import React from 'react';
 import { toast } from 'sonner';
-import { BiArrowBack, BiCopy, BiLayer, BiRefresh } from 'react-icons/bi';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  BiArrowBack,
+  BiChevronDown,
+  BiChevronUp,
+  BiCopy,
+  BiLayer,
+  BiRefresh,
+} from 'react-icons/bi';
 import { Button } from '@aiostreams/ui/button';
 import { copyToClipboard } from '@aiostreams/ui/utils/clipboard';
 import { cn } from '@aiostreams/ui/core/styling';
@@ -10,10 +18,12 @@ import { useSession } from '../lib/session';
 import {
   useItem,
   usePlaybackInfo,
+  usePlaybackInfoOptions,
   useRefreshAll,
   useSegments,
 } from '../lib/queries';
 import { lastVersions, playableSources } from '../lib/playback/play';
+import { type LiveText, useLiveText } from '../lib/playback/live-text';
 import { chosenPlayer } from '../lib/playback/player-choice';
 import {
   directUrl,
@@ -63,7 +73,11 @@ import {
   playOn,
   setLaunched,
   stopPlayback,
+  usePlayback,
 } from '../lib/playback/session';
+import { noteChannelPlayed } from '../lib/live-tv';
+import { useZap, type Zap } from '../components/player/live';
+import { useAction } from '../lib/input';
 import {
   MiniPlayer,
   type MiniVideoPlace,
@@ -192,6 +206,8 @@ export function PlayerPage({
     !playing &&
     !!item.data &&
     (info.data ? !source : !sourceId && !!listed.error);
+  const channel = item.data?.Type === 'TvChannel';
+  const zap = useZap(itemId, channel);
   const youTubeId = playing ? undefined : source?.aiostreams?.ytId;
   const youTube = useYouTubeStream(youTubeId);
   const miniNow = React.useRef(mini);
@@ -200,9 +216,14 @@ export function PlayerPage({
     if (!missing || !item.data) return;
     lastVersions.set(itemId, undefined);
     // In the mini player, a title moved on to has no page to list its versions on.
-    if (miniNow.current) closePlayback();
-    else navigate(versionsPath(item.data, playlist), { replace: true });
-  }, [missing, item.data, itemId, playlist]);
+    if (miniNow.current) {
+      closePlayback();
+      if (channel) toast.error(t`Nothing plays on this channel right now.`);
+    }
+    // A channel stays in the player, which zaps on from it.
+    else if (!channel)
+      navigate(versionsPath(item.data, playlist), { replace: true });
+  }, [missing, item.data, itemId, playlist, channel]);
   React.useEffect(() => {
     if (playing) noteLastPlayed(playing.item, playing.source);
   }, [playing]);
@@ -233,9 +254,10 @@ export function PlayerPage({
     playback.isLoading ||
     picks.isLoading ||
     youTube.isLoading ||
-    missing;
-  const failed =
-    youTubeId && !youTube.data
+    (missing && !channel);
+  const failed = missing
+    ? t`Nothing plays on this channel right now.`
+    : youTubeId && !youTube.data
       ? t`This video didn't load.`
       : t`This version is no longer available.`;
   if (mini && !playing)
@@ -262,7 +284,7 @@ export function PlayerPage({
           />
         </VersionPickerProvider>
       ) : loading ? null : (
-        <Failure itemId={itemId} message={failed} />
+        <Failure itemId={itemId} message={failed} zap={zap} />
       )}
     </>
   );
@@ -311,6 +333,25 @@ function useSwitchVersion(
     });
 }
 
+function useNextLiveVersion(
+  item: BaseItemDto,
+  source: SourceInfo,
+  playlist?: string
+) {
+  const queryClient = useQueryClient();
+  const infoOptions = usePlaybackInfoOptions();
+  return async (): Promise<boolean> => {
+    const info = await queryClient
+      .fetchQuery(infoOptions(item.Id!))
+      .catch(() => undefined);
+    const versions = playableSources(info);
+    const next = versions[versions.findIndex((v) => v.Id === source.Id) + 1];
+    if (!next) return false;
+    playOn({ itemId: item.Id!, sourceId: next.Id!, startMs: 0, playlist });
+    return true;
+  };
+}
+
 /** Reports the playback the way a Jellyfin client does once it starts. */
 function useReporting(
   player: PlayerController,
@@ -351,7 +392,12 @@ function useReporting(
   React.useEffect(() => {
     if (started && lasting) lastVersions.set(item.Id!, source.Id!);
   }, [started, lasting, item.Id, source.Id]);
+  React.useEffect(() => {
+    if (started && item.Type === 'TvChannel')
+      noteChannelPlayed(user.Id!, item.Id!);
+  }, [started, user.Id, item.Type, item.Id]);
 
+  const live = !!source.IsInfiniteStream;
   React.useEffect(() => {
     if (!started) return;
     const current = new PlaybackReporter(
@@ -361,6 +407,7 @@ function useReporting(
         mediaSourceId: source.Id!,
         playSessionId,
         userId: user.Id,
+        live,
       },
       () => ({
         ms: player.playhead.positionMs,
@@ -374,11 +421,13 @@ function useReporting(
     window.addEventListener('pagehide', onHide);
     return () => {
       window.removeEventListener('pagehide', onHide);
-      // The position it leaves is what the pages behind offer to resume.
-      void current.stop().then(() => refresh.current());
+      // The position it leaves is what the pages behind offer to resume; live keeps none.
+      void current.stop().then(() => {
+        if (!live) refresh.current();
+      });
       reporter.current = null;
     };
-  }, [started, client, user.Id, item.Id, source.Id, playSessionId]);
+  }, [started, client, user.Id, item.Id, source.Id, playSessionId, live]);
 
   React.useEffect(() => {
     reporter.current?.progress(paused ? 'Pause' : 'Unpause');
@@ -400,6 +449,7 @@ function Failure({
   source,
   onVersions,
   retry,
+  zap,
 }: {
   itemId: string;
   message: string;
@@ -407,8 +457,15 @@ function Failure({
   source?: SourceInfo;
   onVersions?: () => void;
   retry?: { label: string; run(): void };
+  zap?: Zap;
 }) {
   const { client } = useSession();
+  const step = zap?.step;
+  const leave = () => stopPlayback(to.item(itemId));
+  // A TV's Back would look for the navigation, which the player covers.
+  useAction('back', leave);
+  useAction('live.channelUp', () => step?.(1) ?? false, !!step);
+  useAction('live.channelDown', () => step?.(-1) ?? false, !!step);
   const link =
     item && source && !currentHost().tv
       ? directUrl(client, item.Id!, source)
@@ -427,8 +484,8 @@ function Failure({
             intent="gray-outline"
             className="rounded-full"
             leftIcon={<BiArrowBack className="rtl:-scale-x-100" />}
-            autoFocus={!onVersions && !retry}
-            onClick={() => stopPlayback(to.item(itemId))}
+            autoFocus={!onVersions && !retry && !step}
+            onClick={leave}
           >
             <Trans>Back</Trans>
           </Button>
@@ -453,6 +510,29 @@ function Failure({
             >
               <Trans>Other versions</Trans>
             </Button>
+          )}
+          {step && (
+            <>
+              <Button
+                data-name="previous-channel"
+                intent="gray-outline"
+                className="rounded-full"
+                leftIcon={<BiChevronUp />}
+                onClick={() => step(-1)}
+              >
+                <Trans>Previous channel</Trans>
+              </Button>
+              <Button
+                data-name="next-channel"
+                intent={retry || onVersions ? 'gray-outline' : 'white'}
+                className="rounded-full"
+                leftIcon={<BiChevronDown />}
+                autoFocus={!retry && !onVersions}
+                onClick={() => step(1)}
+              >
+                <Trans>Next channel</Trans>
+              </Button>
+            </>
           )}
           {link && (
             <Button
@@ -624,9 +704,11 @@ function Player({
     setLaunched(!!launched);
     return () => setLaunched(false);
   }, [launched]);
-  // A party's player stops, whatever the setting.
+  const docked = !!usePlayback()?.docked;
+  // A party's player stops, whatever the setting; a preview's goes back to it.
   const back = () => {
-    if (
+    if (docked && !playlistItemId && !launched) minimisePlayback(to.live());
+    else if (
       minimise &&
       !playlistItemId &&
       settings.player.back.read() === 'minimise'
@@ -642,6 +724,8 @@ function Player({
       more ? { type: 'NextItem', playlistItemId } : { type: 'Stop' }
     );
   }, [playlistItemId, ended]);
+  const nextLiveVersion = useNextLiveVersion(item, source, playlist);
+  const zap = useZap(item.Id!, item.Type === 'TvChannel');
   const [subtitleStyle] = useSetting(settings.subtitle.style);
   const [fit] = useSetting(settings.video.fit);
   const localSubtitle = React.useCallback(
@@ -672,6 +756,8 @@ function Player({
         playlist: next.playlist,
       });
     },
+    // A party plays one version for everyone.
+    onLiveFailed: playlistItemId ? undefined : nextLiveVersion,
     prefs,
     subtitleStyle,
     launched,
@@ -785,21 +871,12 @@ function Player({
       )}
       {!mini && (
         <>
-          {player.subtitleText && (
-            <SubtitleText
-              text={player.subtitleText}
-              style={subtitleStyle}
-              lift={player.subtitleLift}
-            />
-          )}
-          {player.stats?.text && (
-            <pre
-              data-ui="player-stats"
-              className="pointer-events-none fixed start-[calc(1rem+env(safe-area-inset-left))] top-[calc(4.5rem+env(safe-area-inset-top))] rounded-lg bg-black/60 px-3 py-2 font-mono text-xs leading-relaxed text-white/90"
-            >
-              {player.stats.text}
-            </pre>
-          )}
+          <PageSubtitle
+            text={player.subtitleText}
+            style={subtitleStyle}
+            lift={player.subtitleLift}
+          />
+          {player.stats && <PlayerStats text={player.stats.text} />}
           {launched && (
             <p
               data-ui="player-external"
@@ -816,6 +893,7 @@ function Player({
               message={t`Playback failed: ${failure}`}
               onVersions={switchVersion}
               retry={player.retry}
+              zap={zap}
             />
           ) : (
             <>
@@ -839,6 +917,7 @@ function Player({
                       : undefined
                   }
                   onParty={together}
+                  live={!!source.IsInfiniteStream}
                 />
               )}
               {inParty && <PartyLayer />}
@@ -848,5 +927,29 @@ function Player({
         </>
       )}
     </div>
+  );
+}
+
+function PageSubtitle({
+  text,
+  ...props
+}: { text: LiveText } & Omit<
+  React.ComponentProps<typeof SubtitleText>,
+  'text'
+>) {
+  const line = useLiveText(text);
+  return line ? <SubtitleText text={line} {...props} /> : null;
+}
+
+function PlayerStats({ text }: { text: LiveText }) {
+  const shown = useLiveText(text);
+  if (!shown) return null;
+  return (
+    <pre
+      data-ui="player-stats"
+      className="pointer-events-none fixed start-[calc(1rem+env(safe-area-inset-left))] top-[calc(4.5rem+env(safe-area-inset-top))] rounded-lg bg-black/60 px-3 py-2 font-mono text-xs leading-relaxed text-white/90"
+    >
+      {shown}
+    </pre>
   );
 }

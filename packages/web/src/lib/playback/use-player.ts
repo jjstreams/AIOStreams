@@ -23,6 +23,7 @@ import { SUBTITLE_LIFT_MS, subtitleHeight } from '../subtitles/style';
 import type { MediaStream, SourceInfo } from '../types';
 import { useLatest } from '../use-latest';
 import type { Chapter } from './chapters';
+import { useLiveRecovery } from './live-recovery';
 import {
   initialState,
   storedVolume,
@@ -46,6 +47,7 @@ import type {
 import { usePlayheadWriter } from './playhead';
 import { thumbnailFeed } from './thumbnails';
 import { chooseTracks, serverFacts, trackFacts } from './track-picks';
+import { createLiveText } from './live-text';
 
 /** How long the player says it is syncing; an answer after that still shows. */
 const ASKED_WAIT_MS = 10_000;
@@ -169,17 +171,21 @@ export function usePlayer(
   // Engines report several things in one go, before the page draws again.
   const live = React.useRef({ ...state, tracks: [] as EngineTrack[] });
   const patch = React.useCallback((next: Partial<PlayerState>) => {
-    live.current = { ...live.current, ...next };
+    // Hosts report unchanged state with every position.
+    const current = live.current;
+    const keys = Object.keys(next) as (keyof PlayerState)[];
+    if (keys.every((k) => Object.is(current[k], next[k]))) return;
+    live.current = { ...current, ...next };
     setState((s) => ({ ...s, ...next }));
   }, []);
   const playhead = usePlayheadWriter(startMs);
   const [tracks, setTracks] = React.useState<EngineTrack[]>([]);
   const [chapters, setChapters] = React.useState<Chapter[]>();
-  const [subtitleText, setSubtitleText] = React.useState<string>();
+  const [subtitleText] = React.useState(createLiveText);
   const [thumbnails, setThumbnails] =
     React.useState<ReturnType<typeof thumbnailFeed>>();
   const [statsPage, setStatsPage] = React.useState<string | null>(null);
-  const [statsText, setStatsText] = React.useState<string>();
+  const [statsText] = React.useState(createLiveText);
   const [retry, setRetry] = React.useState<PlayerController['retry']>();
   const [lift, setLift] = React.useState(0);
   const [fit] = useSetting(settings.video.fit);
@@ -246,6 +252,30 @@ export function usePlayer(
     patch({ error: null, started: false, loaded: false, waiting: true });
   };
 
+  // Reopening keeps the last picture and the controls up, unlike a restart.
+  const reopen = () => {
+    setRetry(undefined);
+    patch({ error: null, waiting: true });
+    engine.load({ ...latestFile.current(0), paused: false });
+  };
+  const liveSource = !!source.IsInfiniteStream;
+  const recovery = useLiveRecovery(liveSource, url, state, {
+    reopen,
+    failed: async (retry) => {
+      if (await latest.current.onLiveFailed?.()) return;
+      patch({
+        waiting: false,
+        error: t({
+          comment: 'Follows "Playback failed:"',
+          message: 'the live stream stopped',
+        }),
+      });
+      setRetry({ label: t`Try again`, run: retry });
+    },
+    showNotice: (shown) => patch({ reconnecting: shown }),
+    positionMs: () => playhead.positionMs,
+  });
+
   handle.current = (event) => {
     switch (event.type) {
       case 'state':
@@ -274,6 +304,7 @@ export function usePlayer(
         return;
       }
       case 'ended': {
+        if (recovery) return recovery.dropped();
         const at = playhead.positionMs;
         if (live.current.durationMs - at <= EARLY_END_MS)
           return latest.current.onEnded();
@@ -293,6 +324,9 @@ export function usePlayer(
         });
       }
       case 'failed': {
+        // Another engine's offer comes first for a source that never played here.
+        if (recovery && (!event.retry || recovery.played))
+          return recovery.dropped();
         patch({ error: event.error });
         const again = event.retry;
         return setRetry(
@@ -310,9 +344,9 @@ export function usePlayer(
       case 'closed':
         return latest.current.onClosed?.();
       case 'subtitle-text':
-        return setSubtitleText(event.text);
+        return subtitleText.set(event.text);
       case 'stats-text':
-        return setStatsText(event.text);
+        return statsText.set(event.text);
     }
   };
 
@@ -349,7 +383,8 @@ export function usePlayer(
     }
     const start = performance.now();
     let frame = requestAnimationFrame(function step(now) {
-      const done = Math.min(1, (now - start) / SUBTITLE_LIFT_MS);
+      // A busy page runs a frame that began before the effect did.
+      const done = Math.min(1, Math.max(0, now - start) / SUBTITLE_LIFT_MS);
       const value = from + (height - from) * (1 - (1 - done) ** 3);
       shownHeight.current = value;
       set({ subtitleStyle, fit, height: value });
@@ -377,7 +412,7 @@ export function usePlayer(
   React.useEffect(() => {
     setRetry(undefined);
     setStatsPage(null);
-    setStatsText(undefined);
+    statsText.set(undefined);
     setRetimed({});
     const file = latestFile.current(startMs);
     if (file.volume) patch(file.volume);
@@ -389,7 +424,9 @@ export function usePlayer(
 
   const [thumbnailsOn] = useSetting(settings.controls.thumbnails);
   React.useEffect(() => {
-    if (!engine.thumbnails || !thumbnailsOn) return;
+    // A live stream has no seek bar, and opening it again can take the
+    // provider's only connection from the player.
+    if (!engine.thumbnails || !thumbnailsOn || liveSource) return;
     const feed = thumbnailFeed((onThumbnail) =>
       engine.thumbnails!({ url, headers: latest.current.headers }, onThumbnail)
     );
@@ -398,7 +435,7 @@ export function usePlayer(
       feed.stop();
       setThumbnails(undefined);
     };
-  }, [engine, latest, url, thumbnailsOn]);
+  }, [engine, latest, url, thumbnailsOn, liveSource]);
 
   React.useEffect(() => {
     if (!thumbnails || !state.started) return;
@@ -644,5 +681,6 @@ export function usePlayer(
     sound: engine.sound,
     fit: engine.fits,
     retry,
+    goLive: liveSource ? reopen : undefined,
   };
 }

@@ -10,6 +10,7 @@ import {
 } from '@tanstack/react-router';
 import {
   BiCalendar,
+  BiTv,
   BiGroup,
   BiDownload,
   BiCompass,
@@ -48,7 +49,8 @@ import { Sidebar, type SidebarItem } from '@aiostreams/ui/shared/sidebar';
 import { cn } from '@aiostreams/ui/core/styling';
 import { useMediaQuery } from '@aiostreams/ui/hooks/media-query';
 import { useSession } from '../lib/session';
-import { useOwnAvatar, usePickableUsers } from '../lib/queries';
+import { useLiveTvView, useOwnAvatar, usePickableUsers } from '../lib/queries';
+import { pageOpening } from '../lib/page-open';
 import { navigate, to } from '../lib/paths';
 import { currentHost } from '../lib/hosts';
 import { pageRtl } from '../lib/direction';
@@ -78,6 +80,7 @@ import { VersionPickerProvider } from './version-picker';
 import { RemoteTarget } from './remote-target';
 import { RemoteSheet } from './remote-sheet';
 import { WatchNextSync } from './watch-next';
+import { ReminderHost } from './live-reminders';
 import { RandomPick } from './random-pick';
 import { ItemMenuHost } from './item-menu';
 import { HomePage } from '../pages/home';
@@ -237,7 +240,9 @@ function AccountMenu({
               return (
                 <DropdownMenuItem
                   key={item.name}
+                  data-ui={group === places ? 'account-menu-page' : undefined}
                   data-name={item.id}
+                  data-shown={(group === places && onBar(item)) || undefined}
                   onClick={item.onClick}
                 >
                   {Icon && <Icon className="text-lg" />}
@@ -286,10 +291,18 @@ export function PageBackground() {
   );
 }
 
+/** A new page's jump to its top, which isn't anyone scrolling. */
+let newPageJump = false;
+/** Longer than a page transition holds its scroll event back; a page already at the top sends none. */
+const NEW_PAGE_JUMP_MS = 1000;
+
 /** The router scrolls a commit after a page renders, so the old offset could paint first. */
 function PageScroll() {
   const saved = useElementScrollRestoration({ getElement: () => window });
   React.useLayoutEffect(() => {
+    // Not by its offset: hiding the last page can already have clamped it.
+    newPageJump = !saved;
+    if (newPageJump) setTimeout(() => (newPageJump = false), NEW_PAGE_JUMP_MS);
     window.scrollTo(saved?.scrollX ?? 0, saved?.scrollY ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -532,6 +545,15 @@ export function WebLayout() {
   React.useEffect(() => {
     document.documentElement.dataset.nav = nav;
   }, [nav]);
+  const live: SidebarItem | null = useLiveTvView().data
+    ? {
+        id: 'live',
+        name: t`Live TV`,
+        iconType: BiTv,
+        isCurrent: pathname.startsWith('/live'),
+        onClick: () => navigate(to.live()),
+      }
+    : null;
   const calendar: SidebarItem = {
     id: 'calendar',
     name: t`Calendar`,
@@ -582,6 +604,7 @@ export function WebLayout() {
       isCurrent: pathname.startsWith('/favourites'),
       onClick: () => navigate(to.favourites()),
     },
+    ...(live ? [live] : []),
     calendar,
     activity,
     playlists,
@@ -697,6 +720,8 @@ export function WebLayout() {
                       : undefined
                 }
                 className={cn(
+                  // A page swiped past the edge mustn't widen the document.
+                  touch && !currentHost().tv && 'overflow-x-clip',
                   shape === 'corner' &&
                     (nav === 'rail'
                       ? 'lg:[--top-bar:calc(1rem+3.875rem)]'
@@ -727,6 +752,7 @@ export function WebLayout() {
                 )}
                 <VersionPickerProvider>
                   <RemoteTarget />
+                  <ReminderHost />
                   <RandomPick />
                   <PlaylistsHost />
                   {currentHost().watchNext && <WatchNextSync />}
@@ -755,6 +781,7 @@ export function WebLayout() {
                           key={pathname}
                           data-page={pageName(pathname)}
                           {...PAGE_FADE}
+                          initial={pageOpening() ? false : PAGE_FADE.initial}
                           className={page}
                         >
                           <Outlet />
@@ -769,20 +796,15 @@ export function WebLayout() {
           </AppLayout>
           {!currentHost().tv && (
             <MobileNav
-              items={items.filter(
-                (i) =>
-                  i !== calendar &&
-                  i !== activity &&
-                  i !== downloads &&
-                  i !== playlists &&
-                  i !== together
-              )}
+              items={items}
               places={[
+                ...(live ? [live] : []),
                 ...(downloads ? [downloads] : []),
                 activity,
                 calendar,
                 playlists,
                 together,
+                ...items.filter(onBar),
               ]}
               menuItems={several ? [settingsItem, switchItem] : [settingsItem]}
               wide={nav === 'bar'}
@@ -868,6 +890,16 @@ function select(item: SidebarItem) {
   };
 }
 
+/** Pages the bottom bar shows; every page is in the bar and its menu, so a stylesheet can move any. */
+const BAR_PAGES: ReadonlySet<string> = new Set([
+  'home',
+  'discover',
+  'search',
+  'favourites',
+]);
+const onBar = (item: Pick<SidebarItem, 'id'>) =>
+  !!item.id && BAR_PAGES.has(item.id);
+
 function MobileNav({
   items,
   places,
@@ -882,7 +914,9 @@ function MobileNav({
   wide: boolean;
   named: boolean;
 }) {
-  const inMenu = [...places, ...menuItems].some((item) => item.isCurrent);
+  const inMenu = [...places.filter((item) => !onBar(item)), ...menuItems].some(
+    (item) => item.isCurrent
+  );
   // The same height either way, as pages keep the bar's room free.
   const tab = cn(
     'gap-0.5 rounded-full px-1 text-[0.65rem]',
@@ -914,6 +948,7 @@ function MobileNav({
             <NavTab
               key={item.id}
               data-ui="mobile-nav-item"
+              data-shown={onBar(item) || undefined}
               item={item}
               icon={Icon && <Icon className={named ? 'text-xl' : 'text-2xl'} />}
               onClick={select(item)}
@@ -1368,6 +1403,18 @@ function useScrollAway(
     let last = window.scrollY;
     const onScroll = () => {
       const y = window.scrollY;
+      if (newPageJump) {
+        // Every bar's listener sees this event before the next task.
+        setTimeout(() => (newPageJump = false));
+        // Stays as it was, unless a page too short to scroll could never bring it back.
+        const canScroll =
+          document.documentElement.scrollHeight >
+          innerHeight + (bar.current?.offsetHeight ?? 0);
+        if (canScroll) {
+          last = y;
+          return;
+        }
+      }
       if (y <= (bar.current?.offsetHeight ?? 0)) setAway(false);
       else if (Math.abs(y - last) < SCROLL_TURN_PX) return;
       else setAway(y > last);

@@ -11,7 +11,12 @@ import { appBridge } from '../../lib/hosts/shell/bridge';
 import type { PlayerController } from '../../lib/playback/controller';
 import type { VideoFrame } from '../../lib/playback/engine';
 import { usePlayhead } from '../../lib/playback/playhead';
-import { closePlayback, expandPlayback } from '../../lib/playback/session';
+import {
+  canMinimise,
+  closePlayback,
+  expandPlayback,
+} from '../../lib/playback/session';
+import { useDock } from '../../lib/playback/dock';
 import { settings, useSetting, type MiniCorner } from '../../lib/settings';
 import type { BaseItemDto } from '../../lib/types';
 import { CachedImage } from '../cached-image';
@@ -241,24 +246,60 @@ function useRoomChanges() {
   return changes;
 }
 
+interface MiniPlayerProps {
+  item?: BaseItemDto;
+  player?: PlayerController;
+  error?: string;
+  /** For the page's own video, which stays where it is in the page so it plays on. */
+  onVideoPlace?: (place: MiniVideoPlace) => void;
+}
+
+/** A TV has no corner card, so between pages it waits this long for a preview. */
+const DOCK_GAP_MS = 300;
+/** A stall shorter than this keeps its picture. */
+const STALL_MS = 500;
+
+/**
+ * Until the first frame, and through a stall that lasts. The video gives way
+ * to the spinner then, as the apps draw it over the page and it would hold the
+ * last picture, or nothing.
+ */
+function useLoading(player: PlayerController | undefined): boolean {
+  const state = player?.state;
+  const stalled =
+    !!state && !state.paused && (state.waiting || !!state.reconnecting);
+  const [late, setLate] = React.useState(false);
+  React.useEffect(() => {
+    if (!stalled) {
+      setLate(false);
+      return;
+    }
+    const timer = setTimeout(() => setLate(true), STALL_MS);
+    return () => clearTimeout(timer);
+  }, [stalled]);
+  return !state?.started || late;
+}
+
+/** Plays on in a page's preview where one is shown, else in a corner. */
+export function MiniPlayer(props: MiniPlayerProps) {
+  const dock = useDock();
+  const room = !!dock || canMinimise();
+  React.useEffect(() => {
+    if (room) return;
+    const timer = setTimeout(closePlayback, DOCK_GAP_MS);
+    return () => clearTimeout(timer);
+  }, [room]);
+  if (dock) return <DockedPlayer {...props} dock={dock} />;
+  return room ? <CornerPlayer {...props} /> : null;
+}
+
 /**
  * The mini player, playing on while pages open: a card in a corner that a drag
  * moves to another, or on narrow windows a bar above the navigation that a
  * swipe up opens and a swipe down closes. An app shows its video where the
  * card leaves room for it; the page's own goes in that room.
  */
-export function MiniPlayer({
-  item,
-  player,
-  error,
-  onVideoPlace,
-}: {
-  item?: BaseItemDto;
-  player?: PlayerController;
-  error?: string;
-  /** For the page's own video, which stays where it is in the page so it plays on. */
-  onVideoPlace?: (place: MiniVideoPlace) => void;
-}) {
+function CornerPlayer({ item, player, error, onVideoPlace }: MiniPlayerProps) {
   const { client } = useSession();
   const narrow = useMediaQuery(NARROW);
   const mode = narrow ? 'bar' : 'card';
@@ -286,6 +327,7 @@ export function MiniPlayer({
     return () => observer.disconnect();
   }, [mode, corner]);
   const covered = useCovered(layout.box);
+  const loading = useLoading(player);
 
   // Pages keep the bar's room free, as they do the navigation's.
   React.useLayoutEffect(() => {
@@ -305,13 +347,13 @@ export function MiniPlayer({
     () => ({
       ...layout.video,
       draggable: mode === 'card',
-      hidden: covered || !!error,
+      hidden: covered || !!error || loading,
       animate,
       radius: mode === 'card' ? CARD_RADIUS : BAR_RADIUS,
       bottomRadius: mode === 'card' ? 0 : BAR_RADIUS,
       subtitles: mode === 'card',
     }),
-    [layout.video, mode, covered, error, animate]
+    [layout.video, mode, covered, error, loading, animate]
   );
   const framed = !!setFrame;
   React.useEffect(() => {
@@ -429,6 +471,7 @@ export function MiniPlayer({
       transition,
       // eslint-disable-next-line lingui/no-unlocalized-strings -- a CSS value
       borderRadius: `${radius}px ${radius}px ${bottomRadius}px ${bottomRadius}px`,
+      opacity: loading ? 0 : undefined,
     });
   }, [
     onVideoPlace,
@@ -438,6 +481,7 @@ export function MiniPlayer({
     transition,
     radius,
     bottomRadius,
+    loading,
   ]);
   return (
     <div
@@ -481,7 +525,7 @@ export function MiniPlayer({
             className="absolute inset-0 h-full w-full object-cover opacity-60"
           />
         )}
-        {!started && !error && (
+        {loading && !error && (
           <div className="absolute inset-0 flex items-center justify-center">
             <LoadingSpinner className="size-6" />
           </div>
@@ -585,6 +629,121 @@ function Progress({
         className="h-full bg-brand-400"
         style={{ width: `${share * 100}%` }}
       />
+    </div>
+  );
+}
+
+/** As the page's own fade moves it into place after it mounts. */
+const SETTLE_MS = 600;
+
+const sameBox = (a: Box, b: Box) =>
+  a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+
+function useBoxOf(el: HTMLElement): Box {
+  const [box, setBox] = React.useState<Box>({
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+  });
+  React.useLayoutEffect(() => {
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      const next = { x: r.left, y: r.top, width: r.width, height: r.height };
+      setBox((last) => (sameBox(last, next) ? last : next));
+    };
+    measure();
+    const until = performance.now() + SETTLE_MS;
+    let frame = requestAnimationFrame(function settle(at) {
+      measure();
+      if (at < until) frame = requestAnimationFrame(settle);
+    });
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    observer.observe(document.documentElement);
+    document.addEventListener('scroll', measure, {
+      capture: true,
+      passive: true,
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      document.removeEventListener('scroll', measure, { capture: true });
+    };
+  }, [el]);
+  return box;
+}
+
+/** The video in a page's preview: the page draws around it and takes its presses. */
+function DockedPlayer({
+  dock,
+  player,
+  error,
+  onVideoPlace,
+}: MiniPlayerProps & { dock: HTMLElement }) {
+  const box = useBoxOf(dock);
+  const covered = useCovered(box);
+  const loading = useLoading(player);
+  const [radius] = React.useState(
+    () => parseFloat(getComputedStyle(dock).borderTopLeftRadius) || 0
+  );
+  const setFrame = player?.setFrame;
+  const latestSetFrame = React.useRef(setFrame);
+  latestSetFrame.current = setFrame;
+  const frame = React.useMemo<VideoFrame>(
+    () => ({
+      ...box,
+      draggable: false,
+      hidden: covered || !!error || !box.width || loading,
+      animate: false,
+      radius,
+      bottomRadius: radius,
+      subtitles: true,
+    }),
+    [box, covered, error, loading, radius]
+  );
+  const framed = !!setFrame;
+  React.useEffect(() => {
+    if (framed) latestSetFrame.current?.(frame);
+  }, [framed, frame]);
+  React.useEffect(() => () => latestSetFrame.current?.(null), []);
+  React.useEffect(
+    () =>
+      appBridge()?.subscribe((m) => {
+        if (m.type === 'player-frame' && !('x' in m) && m.event === 'tap')
+          expandPlayback();
+      }),
+    []
+  );
+  React.useLayoutEffect(() => {
+    onVideoPlace?.({
+      width: box.width,
+      height: box.height,
+      transform: `translate(${box.x}px, ${box.y}px)`,
+      borderRadius: `${radius}px`,
+      opacity: loading ? 0 : undefined,
+    });
+  }, [onVideoPlace, box, radius, loading]);
+  return (
+    <div
+      data-ui="docked-player"
+      className="pointer-events-none fixed left-0 top-0 z-40 flex items-center justify-center"
+      style={{
+        width: box.width,
+        height: box.height,
+        transform: `translate(${box.x}px, ${box.y}px)`,
+      }}
+    >
+      {error ? (
+        <p
+          data-name="error"
+          className="rounded-full bg-black/70 px-3 py-1 text-sm text-red-300"
+        >
+          {t`Playback failed`}
+        </p>
+      ) : (
+        loading && <LoadingSpinner className="size-8" />
+      )}
     </div>
   );
 }

@@ -11,9 +11,11 @@ import {
 import { PageMessage, WebLayout } from './components/layout';
 import { navigate, setNavigator, to } from './lib/paths';
 import { lastCatalog } from './lib/settings';
+import { openStartPage } from './lib/start-page';
 import { DiscoverIndex, DiscoverPage } from './pages/discover';
 import { FavouritesPage } from './pages/favourites';
 import { CalendarPage } from './pages/calendar';
+import { LiveTvPage } from './pages/live-tv';
 import { SearchPage } from './pages/search';
 import { ItemPage } from './pages/item';
 import { PersonPage } from './pages/person';
@@ -64,6 +66,21 @@ const favouritesRoute = createRoute({
 function FavouritesRouteView(): React.ReactElement {
   const { kind } = favouritesRoute.useSearch();
   return <FavouritesPage kind={kind} />;
+}
+
+const liveRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/live',
+  validateSearch: (search: Record<string, unknown>) => ({
+    group: search.group == null ? undefined : String(search.group),
+    view: search.view == null ? undefined : String(search.view),
+  }),
+  component: LiveRouteView,
+});
+
+function LiveRouteView(): React.ReactElement {
+  const { group, view } = liveRoute.useSearch();
+  return <LiveTvPage group={group} view={view} />;
 }
 
 const calendarRoute = createRoute({
@@ -232,6 +249,7 @@ const routeTree = rootRoute.addChildren([
     historyRoute,
     downloadsRoute,
     favouritesRoute,
+    liveRoute,
     calendarRoute,
     settingsRoute,
     searchRoute,
@@ -263,6 +281,8 @@ function NotFoundPage(): React.ReactElement {
     </PageMessage>
   );
 }
+
+openStartPage();
 
 export const webRouter = createRouter({
   routeTree,

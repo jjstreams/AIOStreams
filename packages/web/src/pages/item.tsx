@@ -10,13 +10,13 @@ import {
   BiGroup,
   BiHeart,
   BiListPlus,
-  BiPlay,
-  BiRevision,
   BiShuffle,
   BiSolidDislike,
   BiSolidHeart,
   BiDotsHorizontalRounded,
 } from 'react-icons/bi';
+import { IoPlay } from 'react-icons/io5';
+import { LuRotateCcw } from 'react-icons/lu';
 import { Badge } from '@aiostreams/ui/badge';
 import { Button, IconButton } from '@aiostreams/ui/button';
 import { Drawer } from '@aiostreams/ui/drawer';
@@ -57,14 +57,15 @@ import {
 } from '../lib/images';
 import {
   clock,
+  dateFormat,
   dayLabel,
   duration,
   episodeCode,
   fullTitle,
+  isUnaired,
   itemSubtitle,
   lacksDetails,
   ticksToMs,
-  isUnaired,
   untilLabel,
 } from '../lib/format';
 import { href, itemPath, navigate, to } from '../lib/paths';
@@ -101,7 +102,13 @@ import { BackdropFrame } from '../components/hero';
 import type { BaseItemDto } from '../lib/types';
 import { useHold } from '../lib/use-hold';
 import { useExternalReturn } from '../lib/playback/external-return';
-import { focusDialog, tab, tabList, useDialogStart } from '../lib/input';
+import {
+  focusDialog,
+  navWait,
+  tab,
+  tabList,
+  useDialogStart,
+} from '../lib/input';
 import { CachedImage } from '../components/cached-image';
 import { TrailerButton } from '../components/trailers';
 import { trailersOf } from '../lib/playback/trailers';
@@ -205,6 +212,9 @@ export function ItemPage({
   );
 }
 
+/** Art that arrives within this was never seen missing, so it just appears. */
+const UNSEEN_MS = 250;
+
 /** Past the landscape art, the poster stands in as a blurred wash of its colours. */
 function Backdrop({
   images,
@@ -218,18 +228,43 @@ function Backdrop({
   // Tied to the sources, not reset by an effect, which a cached image can load before.
   const [failed, setFailed] = React.useState({ key: '', count: 0 });
   const attempt = failed.key === key ? failed.count : 0;
-  const [loadedSrc, setLoadedSrc] = React.useState<string | null>(null);
+  const [opened] = React.useState(() => performance.now());
+  const [arrived, setArrived] = React.useState<{
+    src: string;
+    late: boolean;
+  } | null>(null);
   const src = sources[attempt];
-  const loaded = !!src && loadedSrc === src;
+  const loaded = !!src && arrived?.src === src;
   const wash = attempt >= images.length;
+  // Shown before the first frame when another image already holds it in memory.
+  const held = React.useCallback(
+    (el: HTMLImageElement | null) => {
+      if (src && el?.complete && el.naturalWidth)
+        setArrived({ src, late: false });
+    },
+    [src]
+  );
   const image = src && (
     <CachedImage
       key={src}
+      ref={held}
       data-ui="item-backdrop-image"
       data-wash={wash || undefined}
       src={src}
       alt=""
-      onLoad={() => setLoadedSrc(src)}
+      // Decoded first, as a large image would otherwise appear a moment after it's shown.
+      onLoad={(e) =>
+        void e.currentTarget
+          .decode()
+          .catch(() => undefined)
+          .then(() =>
+            setArrived((was) =>
+              was?.src === src
+                ? was
+                : { src, late: performance.now() - opened > UNSEEN_MS }
+            )
+          )
+      }
       onError={() =>
         setFailed((f) => ({
           key,
@@ -237,7 +272,8 @@ function Backdrop({
         }))
       }
       className={cn(
-        'absolute inset-0 h-full w-full object-cover transition-opacity duration-700',
+        'absolute inset-0 h-full w-full object-cover',
+        loaded && arrived.late && 'transition-opacity duration-700',
         wash ? 'scale-125 blur-3xl saturate-150' : 'object-top',
         !loaded ? 'opacity-0' : wash ? 'opacity-50' : 'opacity-100'
       )}
@@ -265,7 +301,7 @@ function Backdrop({
       <div
         data-ui="item-backdrop-shade"
         data-name="bottom"
-        className="absolute inset-x-0 bottom-0 h-3/4 bg-gradient-to-t from-[--background] via-[--background]/70 to-transparent"
+        className="absolute inset-x-0 bottom-0 h-3/4 bg-gradient-to-t from-[--background] via-[--background]/70 to-transparent max-sm:h-1/2"
       />
     </div>
   );
@@ -326,7 +362,7 @@ const MetaRow = React.memo(function MetaRow({ item }: { item: BaseItemDto }) {
   return (
     <div
       data-ui="item-meta"
-      className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-gray-200"
+      className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-gray-200 max-sm:justify-center"
     >
       {parts.map(([name, part], i) => (
         <React.Fragment key={name}>
@@ -427,53 +463,66 @@ function Header({ item, season }: { item: BaseItemDto; season?: BaseItemDto }) {
         />
       )}
       <div className="min-w-0 max-w-3xl flex-1 space-y-4">
-        {logo && !logoFailed ? (
-          <CachedImage
-            data-ui="item-logo"
-            src={logo}
-            alt={item.Name ?? ''}
-            onError={() => setLogoFailed(true)}
-            className="max-h-24 max-w-[min(26rem,85%)] object-contain object-left lg:max-h-32"
+        <div data-ui="item-heading" className="space-y-4">
+          {logo && !logoFailed ? (
+            <CachedImage
+              data-ui="item-logo"
+              src={logo}
+              alt={item.Name ?? ''}
+              onError={() => setLogoFailed(true)}
+              className="max-h-24 max-w-[min(26rem,85%)] object-contain object-left max-sm:mx-auto max-sm:object-center lg:max-h-32"
+            />
+          ) : (
+            <h1
+              data-ui="item-title"
+              className="text-3xl font-bold leading-tight max-sm:text-center sm:text-4xl lg:text-5xl"
+            >
+              {item.Name}
+            </h1>
+          )}
+          {item.Taglines?.[0] && (
+            <p
+              data-ui="item-tagline"
+              className="text-base italic text-gray-300 max-sm:text-center"
+            >
+              {item.Taglines[0]}
+            </p>
+          )}
+          <MetaRow item={item} />
+          {item.Type === 'Series' && item.Status === 'Continuing' && (
+            <NextAiring series={item} />
+          )}
+          {!!item.Genres?.length && (
+            <div
+              data-ui="item-genres"
+              className="flex flex-wrap gap-1.5 max-sm:justify-center"
+            >
+              {item.Genres.map((genre) => (
+                <Badge
+                  key={genre}
+                  data-ui="item-genre"
+                  intent="white"
+                  size="md"
+                >
+                  {genre}
+                </Badge>
+              ))}
+            </div>
+          )}
+          <Overview
+            title={item.Name ?? ''}
+            line={[item.ProductionYear, item.Genres?.slice(0, 3).join(', ')]
+              .filter(Boolean)
+              .join(' · ')}
+            overview={item.Overview}
+            image={overviewImage}
+            clampClass="max-h-[4lh]"
+            className="text-sm leading-relaxed text-gray-300 sm:text-base"
           />
-        ) : (
-          <h1
-            data-ui="item-title"
-            className="text-3xl font-bold leading-tight sm:text-4xl lg:text-5xl"
-          >
-            {item.Name}
-          </h1>
-        )}
-        {item.Taglines?.[0] && (
-          <p data-ui="item-tagline" className="text-base italic text-gray-300">
-            {item.Taglines[0]}
-          </p>
-        )}
-        <MetaRow item={item} />
-        {item.Type === 'Series' && item.Status === 'Continuing' && (
-          <NextAiring series={item} />
-        )}
-        {!!item.Genres?.length && (
-          <div data-ui="item-genres" className="flex flex-wrap gap-1.5">
-            {item.Genres.map((genre) => (
-              <Badge key={genre} data-ui="item-genre" intent="white" size="md">
-                {genre}
-              </Badge>
-            ))}
-          </div>
-        )}
-        <Overview
-          title={item.Name ?? ''}
-          line={[item.ProductionYear, item.Genres?.slice(0, 3).join(', ')]
-            .filter(Boolean)
-            .join(' · ')}
-          overview={item.Overview}
-          image={overviewImage}
-          clampClass="max-h-[4lh]"
-          className="text-sm leading-relaxed text-gray-300 sm:text-base"
-        />
+        </div>
         <div
           data-ui="item-actions"
-          className="flex flex-wrap items-center gap-2"
+          className="flex flex-wrap items-center gap-2 max-sm:justify-center"
         >
           {(target || nextUpPending) && (
             <div className="flex w-full items-center gap-2 sm:w-auto">
@@ -487,7 +536,7 @@ function Header({ item, season }: { item: BaseItemDto; season?: BaseItemDto }) {
                   item.Type === 'Series' && 'sm:min-w-[9.5rem]',
                   quick && 'h-12 text-base'
                 )}
-                leftIcon={<BiPlay className="text-xl" />}
+                leftIcon={<IoPlay className="text-xl" />}
                 onClick={() =>
                   target
                     ? picker.play(target, { startMs: resumeMs })
@@ -512,8 +561,9 @@ function Header({ item, season }: { item: BaseItemDto; season?: BaseItemDto }) {
                       data-ui="item-action"
                       data-name="restart"
                       intent="gray-subtle"
-                      className="rounded-full"
-                      icon={<BiRevision />}
+                      size={quick ? 'lg' : 'md'}
+                      className="rounded-full text-2xl"
+                      icon={<LuRotateCcw />}
                       aria-label={t`Play from the start`}
                       onClick={() => picker.play(target, { startMs: 0 })}
                       {...holdRestart}
@@ -941,7 +991,7 @@ function NextAiring({ series }: { series: BaseItemDto }) {
   return (
     <p
       data-ui="item-next-airing"
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm max-sm:justify-center"
     >
       <BiCalendarAlt className="text-lg text-[--muted]" />
       <span className="font-semibold">
@@ -1071,7 +1121,7 @@ function Seasons({
       {layout === 'list' && summaryLine}
       {layout === 'row' ? (
         loading ? (
-          <div data-nav-wait>
+          <div ref={navWait}>
             <MediaRow
               key="loading"
               shape="wide"
@@ -1110,7 +1160,7 @@ function Seasons({
           </div>
         )
       ) : loading ? (
-        <div data-nav-wait>
+        <div ref={navWait}>
           <EpisodeListSkeleton columns />
         </div>
       ) : (
@@ -1409,9 +1459,8 @@ function airsLine(
   if (!days?.length) return null;
   const names = days.map((day) =>
     // 1 January 2023 was a Sunday.
-    new Date(2023, 0, 1 + WEEKDAYS.indexOf(day)).toLocaleDateString(
-      formatLocale(),
-      { weekday: 'long' }
+    dateFormat({ weekday: 'long' }).format(
+      new Date(2023, 0, 1 + WEEKDAYS.indexOf(day))
     )
   );
   const list = new Intl.ListFormat(formatLocale(), {
@@ -1423,11 +1472,9 @@ function airsLine(
 function Details({ item }: { item: BaseItemDto }) {
   const airs = airsLine(item.AirDays, item.AirTime);
   const released = item.PremiereDate
-    ? new Date(item.PremiereDate).toLocaleDateString(formatLocale(), {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      })
+    ? dateFormat({ day: 'numeric', month: 'long', year: 'numeric' }).format(
+        new Date(item.PremiereDate)
+      )
     : null;
   const rows: [string, string, React.ReactNode][] = (
     [

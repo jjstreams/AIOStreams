@@ -1,7 +1,9 @@
 import { Router, type Request } from 'express';
 import {
+  channelOf,
   checkInWatchSession,
   closeWatchSession,
+  encodeItemId,
   getWatchStateProvider,
   watchIdentityFor,
   openWatchSession,
@@ -103,18 +105,23 @@ function snapshotOf(item: JellyfinItem | null): WatchSnapshot | undefined {
 /** A channel has no position worth keeping, so live playback writes no history. */
 async function playingLive(
   ctx: JellyfinRequestContext,
+  d: ContentDescriptor,
   itemId: string,
   mediaSourceId: string | undefined
 ): Promise<boolean> {
   const memo = await resolveByItem(ctx.uuid, ctx.scope(), itemId).catch(
     () => null
   );
-  if (!memo) return false;
-  const source = pickSource(
-    memo,
-    mediaSourceId === itemId ? undefined : mediaSourceId
+  const source =
+    memo &&
+    pickSource(memo, mediaSourceId === itemId ? undefined : mediaSourceId);
+  if (source) return !!source.live;
+  // The memo expires under a channel left on, and misses versions from a newer list.
+  return (
+    d.t === 'tv' ||
+    d.t === 'channel' ||
+    (!!memo?.sources.length && memo.sources.every((s) => s.live))
   );
-  return !!source?.live;
 }
 
 /** Jellyfin takes the runtime from the source being played, then the item. */
@@ -195,15 +202,20 @@ async function record(
 ): Promise<void> {
   // Before any await, so a tick still in flight when a stop is written is older.
   const at = Date.now();
-  const d = await descriptorFor(ctx, rawId);
+  const found = await decodeItemForRequest(ctx, rawId);
+  // A programme, live or from its start, reports as its channel and keeps no history.
+  const programme = found?.k === 'program';
+  const d = programme ? channelOf(found) : found;
   if (!d || (d.k !== 'movie' && d.k !== 'episode')) return;
+  const itemId = programme ? encodeItemId(d) : rawId;
   const { tracks } = opts;
-  if (await playingLive(ctx, rawId, opts.mediaSourceId)) {
+  if (programme || (await playingLive(ctx, d, itemId, opts.mediaSourceId))) {
     // The session still tracks what is on; only the history is skipped.
     const session = sessionOf(ctx, opts.playSessionId);
     if (type === 'start')
       await openWatchSession(session, contentRefOf(d), {
         positionMs,
+        live: true,
         ...tracks,
       });
     else if (type === 'stop') await closeWatchSession(session);
@@ -238,7 +250,13 @@ async function record(
 
   // one meta call on start and stop, none on the 5-10 s progress ticks
   const item = await itemFromDescriptor(ctx, d).catch(() => null);
-  const durationMs = await durationFor(ctx, d, rawId, item, opts.mediaSourceId);
+  const durationMs = await durationFor(
+    ctx,
+    d,
+    itemId,
+    item,
+    opts.mediaSourceId
+  );
   const event: WatchEvent = {
     type,
     identity,

@@ -2,6 +2,7 @@ import { t } from '@lingui/core/macro';
 import { storage } from '../storage';
 import type { JellyfinClient } from '../client';
 import type { Chapter } from './chapters';
+import type { LiveText } from './live-text';
 import type { SubtitleStyle } from '../settings';
 import type { SubtitleLine } from '../subtitles/cues';
 import { subtitleType, type SubtitleFacts } from '../subtitles/tracks';
@@ -43,6 +44,7 @@ export interface PlayerState {
   /** Positive shows subtitles later. */
   subtitleDelayMs: number;
   error: string | null;
+  reconnecting?: boolean;
   /** The video plays in a small window of its own, with nothing over it. */
   pictureInPicture?: boolean;
   /** The sound goes out undecoded, which a change of speed can't stretch. */
@@ -99,7 +101,7 @@ export interface PlayerController {
     status?: SyncStatus;
   };
   /** The subtitle the page draws, for a player that draws none itself. */
-  subtitleText?: string;
+  subtitleText: LiveText;
   /** The share `liftSubtitles` last asked for, which the page's own subtitle slides to. */
   subtitleLift: number;
   /** Missing where the player has no pictures for the seek bar. */
@@ -114,7 +116,7 @@ export interface PlayerController {
     pages: Track[];
     page: string | null;
     show(page: string | null): void;
-    text?: string;
+    text: LiveText;
   };
   /** Loads a subtitle file from this device; `types` are the extensions it reads. */
   subtitleFiles?: {
@@ -133,6 +135,8 @@ export interface PlayerController {
   fit?: boolean;
   /** Plays the file again after it failed, from where it stopped or on another engine. */
   retry?: { label: string; run(): void };
+  /** Joins a live source at its edge again, after a pause left it behind. */
+  goLive?: () => void;
   /** Others watch along, so nothing acts on its own, like skipping or speeding up. */
   shared?: boolean;
 }
@@ -165,6 +169,8 @@ export interface PlayerOptions {
   onClosed?: () => void;
   /** That player moved on to what it was given with `queueNext`. */
   onAdvance?: (next: QueuedItem) => void;
+  /** Moves on from a live source that kept failing; false when there is nothing else to play. */
+  onLiveFailed?: () => Promise<boolean>;
   startPaused?: boolean;
 }
 

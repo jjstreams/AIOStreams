@@ -668,6 +668,14 @@ neither the environment variable nor a stored value is present.
 | `DEFAULT_STAR_WARS_UNIVERSE_TIMEOUT`    | Star Wars Universe › Default Timeout    | number | —                                               | Default timeout for the Star Wars Universe addon (milliseconds). Falls back to the global default when unset. |
 | `DEFAULT_STAR_WARS_UNIVERSE_USER_AGENT` | Star Wars Universe › Default User Agent | string | —                                               | Default User-Agent for the Star Wars Universe addon. Supports `{version}`/`{random}` placeholders.            |
 
+#### Cinemeta
+
+| Environment Variable          | UI Setting                    | Type   | Default                            | Description                                                                                         |
+| ----------------------------- | ----------------------------- | ------ | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `CINEMETA_URL`                | Cinemeta › URL                | list   | `["https://v3-cinemeta.strem.io"]` | Upstream URL(s) for the Cinemeta addon.                                                             |
+| `DEFAULT_CINEMETA_TIMEOUT`    | Cinemeta › Default Timeout    | number | —                                  | Default timeout for the Cinemeta addon (milliseconds). Falls back to the global default when unset. |
+| `DEFAULT_CINEMETA_USER_AGENT` | Cinemeta › Default User Agent | string | —                                  | Default User-Agent for the Cinemeta addon. Supports `{version}`/`{random}` placeholders.            |
+
 #### Anime Kitsu
 
 | Environment Variable             | UI Setting                       | Type   | Default                             | Description                                                                                            |
@@ -1094,13 +1102,13 @@ neither the environment variable nor a stored value is present.
 
 #### Torrent Galaxy
 
-| Environment Variable                      | UI Setting                        | Type     | Default                     | Description                                                   |
-| ----------------------------------------- | --------------------------------- | -------- | --------------------------- | ------------------------------------------------------------- |
-| `BUILTIN_TORRENT_GALAXY_URL`              | Torrent Galaxy › URL              | string   | `https://torrentgalaxy.one` | Base URL for the Torrent Galaxy built-in addon.               |
-| `BUILTIN_DEFAULT_TORRENT_GALAXY_TIMEOUT`  | Torrent Galaxy › Default Timeout  | number   | —                           | Default timeout for Torrent Galaxy requests.                  |
-| `BUILTIN_TORRENT_GALAXY_SEARCH_TIMEOUT`   | Torrent Galaxy › Search Timeout   | number   | `30000`                     | Timeout for Torrent Galaxy search requests.                   |
-| `BUILTIN_TORRENT_GALAXY_SEARCH_CACHE_TTL` | Torrent Galaxy › Search Cache TTL | duration | `604800`                    | Cache TTL for Torrent Galaxy search results.                  |
-| `BUILTIN_TORRENT_GALAXY_PAGE_LIMIT`       | Torrent Galaxy › Page Limit       | number   | `5`                         | Maximum pages fetched when paginating Torrent Galaxy results. |
+| Environment Variable                      | UI Setting                        | Type     | Default                        | Description                                                   |
+| ----------------------------------------- | --------------------------------- | -------- | ------------------------------ | ------------------------------------------------------------- |
+| `BUILTIN_TORRENT_GALAXY_URL`              | Torrent Galaxy › URL              | string   | `https://torrentgalaxy.online` | Base URL for the Torrent Galaxy built-in addon.               |
+| `BUILTIN_DEFAULT_TORRENT_GALAXY_TIMEOUT`  | Torrent Galaxy › Default Timeout  | number   | —                              | Default timeout for Torrent Galaxy requests.                  |
+| `BUILTIN_TORRENT_GALAXY_SEARCH_TIMEOUT`   | Torrent Galaxy › Search Timeout   | number   | `30000`                        | Timeout for Torrent Galaxy search requests.                   |
+| `BUILTIN_TORRENT_GALAXY_SEARCH_CACHE_TTL` | Torrent Galaxy › Search Cache TTL | duration | `604800`                       | Cache TTL for Torrent Galaxy search results.                  |
+| `BUILTIN_TORRENT_GALAXY_PAGE_LIMIT`       | Torrent Galaxy › Page Limit       | number   | `5`                            | Maximum pages fetched when paginating Torrent Galaxy results. |
 
 #### Eztv
 
@@ -1141,6 +1149,19 @@ neither the environment variable nor a stored value is present.
 | `BUILTIN_TSUKIHIME_SEARCH_TIMEOUT`   | Tsukihime › Search Timeout   | number   | `30000`                         | Timeout for TsukiHime search requests.                   |
 | `BUILTIN_TSUKIHIME_SEARCH_CACHE_TTL` | Tsukihime › Search Cache TTL | duration | `604800`                        | Cache TTL for TsukiHime search results.                  |
 | `BUILTIN_TSUKIHIME_PAGE_LIMIT`       | Tsukihime › Page Limit       | number   | `5`                             | Maximum pages fetched when paginating TsukiHime results. |
+
+#### Xtream
+
+| Environment Variable              | UI Setting                | Type     | Default     | Description                                                                                                                                                                                                              |
+| --------------------------------- | ------------------------- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BUILTIN_XTREAM_TIMEOUT`          | Xtream › Timeout          | number   | `20000`     | How long a request to an Xtream server may take. Channel lists of large providers run to several megabytes.                                                                                                              |
+| `BUILTIN_XTREAM_USER_AGENT`       | Xtream › User Agent       | string   | —           | User-Agent sent to Xtream servers, for providers that only answer known players.                                                                                                                                         |
+| `BUILTIN_XTREAM_HOST_CONCURRENCY` | Xtream › Host Concurrency | number   | `6`         | Requests sent to one Xtream server at once, across every user of this instance. The rest wait their turn. _(restart required)_                                                                                           |
+| `BUILTIN_XTREAM_PAGE_WAIT`        | Xtream › Page Wait        | number   | `4000`      | How long a guide page waits for its channels' programmes. Programmes that arrive later appear on the next request. Keep it under the addon's timeout.                                                                    |
+| `BUILTIN_XTREAM_LINEUP_TTL`       | Xtream › Lineup TTL       | duration | `21600`     | How old an account's channel list gets before it is fetched again. The old list keeps answering while the new one loads.                                                                                                 |
+| `BUILTIN_XTREAM_GUIDE_TTL`        | Xtream › Guide TTL        | duration | `21600`     | How old a channel's programmes get before they are fetched again. The old ones keep answering while the new ones load.                                                                                                   |
+| `BUILTIN_XTREAM_LINEUP_MEMORY`    | Xtream › Lineup Memory    | size     | `256000000` | Memory for accounts' channel lists, the least recently used leaving first. A provider with 50,000 channels takes about 5 MB. Lists that leave are read back from Redis, or the database without it. _(restart required)_ |
+| `BUILTIN_XTREAM_GUIDE_MEMORY`     | Xtream › Guide Memory     | size     | `128000000` | Memory for channels' programmes, shared by every account on the same server. A channel's week takes around 100 KB. Guides that leave are read back from Redis, or the database without it. _(restart required)_          |
 
 ### Posters
 

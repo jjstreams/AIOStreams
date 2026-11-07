@@ -8,6 +8,7 @@ import {
   createLogger,
   DistributedLock,
   hasProgrammeVideos,
+  isChannel,
   encodeItemId,
   FULL_SUPPORT,
   requestLockType,
@@ -98,13 +99,16 @@ export async function playTargetFor(
   if (d.k === 'episode') {
     const meta = await getMeta(ctx, d.t, d.i).catch(() => null);
     const video = meta?.videos?.find((v) => v.id === d.v) as
-      | MetaVideo
-      | undefined;
+      MetaVideo | undefined;
+    // A channel's programme runs from its start to its end.
+    const aired =
+      Date.parse(String(video?.endTime)) - Date.parse(String(video?.startTime));
     return {
       type: d.t,
       videoId: d.v,
       runtimeMs:
-        parseRuntimeMs(video?.runtime) ?? parseRuntimeMs(meta?.runtime),
+        parseRuntimeMs(video?.runtime) ??
+        (aired > 0 ? aired : parseRuntimeMs(meta?.runtime)),
       streams: video?.streams ?? undefined,
     };
   }
@@ -114,8 +118,7 @@ export async function playTargetFor(
     const hinted = d.p ? undefined : meta?.behaviorHints?.defaultVideoId;
     const videoId = typeof hinted === 'string' && hinted ? hinted : d.i;
     const video = meta?.videos?.find((v) => v.id === videoId) as
-      | MetaVideo
-      | undefined;
+      MetaVideo | undefined;
     const runtimeMs =
       parseRuntimeMs(video?.runtime) ??
       (d.p
@@ -248,11 +251,6 @@ function keepEnrichedSubtitles(
   }
 }
 
-/** Live by the content when the url says nothing: a channel, or a schedule. */
-function isLiveContent(type: string, meta: ParsedMeta | null): boolean {
-  return type === 'tv' || type === 'channel' || hasProgrammeVideos(meta);
-}
-
 async function resolveUncached(
   ctx: JellyfinRequestContext,
   d: ContentDescriptor,
@@ -263,12 +261,13 @@ async function resolveUncached(
   if (!target) return null;
 
   const engine = await ctx.engine();
-  const liveContent = isLiveContent(
-    target.type,
-    await getMeta(ctx, d.t, d.k === 'movie' ? (d.p ?? d.i) : d.i).catch(
-      () => null
-    )
-  );
+  // A channel's programme plays from its archive, which is not live.
+  const liveContent =
+    d.k === 'movie' &&
+    isChannel(
+      target.type,
+      await getMeta(ctx, d.t, d.p ?? d.i).catch(() => null)
+    );
   /* Copied, not marked in place: the pipeline result is cached and shared. */
   const asLive = (stream: ParsedStream): ParsedStream =>
     liveContent && stream.type !== 'live'

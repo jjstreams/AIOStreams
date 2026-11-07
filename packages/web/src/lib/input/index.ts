@@ -13,6 +13,7 @@ export {
   type ActionId,
 } from './actions';
 export {
+  backIsFree,
   inputCount,
   isRepeat,
   mediaKeyJustTaken,
@@ -34,6 +35,7 @@ export {
   move,
   moveTo,
   navSide,
+  navWait,
   openMenu,
   scrollStep,
   type Direction,
