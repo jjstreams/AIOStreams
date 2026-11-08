@@ -40,7 +40,7 @@ import {
   usePlayback,
 } from '../../lib/playback/session';
 import { navigate, to } from '../../lib/paths';
-import { focusOn, isTextField, useAction } from '../../lib/input';
+import { focusOn, isTextField, pickOnFocus, useAction } from '../../lib/input';
 import { NumberEntry, useNumberEntry } from '../../components/channel-number';
 import type { BaseItemDto } from '../../lib/types';
 import { PageMessage } from '../../components/layout';
@@ -133,6 +133,14 @@ export function LiveTvPage({
     : groupsLoading
       ? wanted
       : ALL;
+  // The picker's last group, which it picks again as the keys come back to it.
+  const [addonGroup, setAddonGroup] = React.useState<string>();
+  if (
+    group !== addonGroup &&
+    !OWN_GROUPS.has(group) &&
+    groups.some((g) => g.id === group)
+  )
+    setAddonGroup(group);
   const pages = useChannelPages(group, { enabled: !!view.data });
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = pages;
   const channels = React.useMemo(
@@ -282,6 +290,14 @@ export function LiveTvPage({
       ) ?? document.querySelector<HTMLElement>('[data-ui=live-group-picker]');
     if (target) focusOn(target);
   };
+  // The guide has the programme's details above it, where the list has the groups.
+  const leaveGuideUp = () => {
+    const target = document.querySelector<HTMLElement>(
+      '[data-ui=live-top] button'
+    );
+    if (target) focusOn(target);
+    else leaveUp();
+  };
   // A remote's digits go to the channel with that number, loading on to it.
   // Numbers run through the whole lineup, so one outside the group opens All
   // channels on it.
@@ -417,6 +433,11 @@ export function LiveTvPage({
               }))}
               value={addonGroups.some((g) => g.id === group) ? [group] : []}
               onValueChange={(next) => next[0] && chooseGroup(next[0])}
+              {...pickOnFocus(
+                addonGroup && addonGroup !== group
+                  ? () => chooseGroup(addonGroup)
+                  : undefined
+              )}
             />
           </div>
         )}
@@ -510,7 +531,7 @@ export function LiveTvPage({
                 onFocus={(next) => follow(next.row, next.at)}
                 onPlay={playFromGuide}
                 onRange={onRange}
-                onLeaveUp={leaveUp}
+                onLeaveUp={leaveGuideUp}
                 reminded={reminded}
               />
             </div>
