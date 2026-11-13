@@ -97,6 +97,10 @@ msgstr "{found, plural, one {Filter # version} other {Filter # versions}}"
 msgid "{got} of {size}"
 msgstr "{got} of {size}"
 
+#: src/lib/playback/quality.ts
+msgid "{height}, {mbps} Mbps"
+msgstr "{height}, {mbps} Mbps"
+
 #: src/features/player/options.tsx
 msgid "{height}%"
 msgstr "{height}%"
@@ -613,6 +617,10 @@ msgstr "Apply CSS"
 msgid "Apply to styled subtitles too"
 msgstr "Apply to styled subtitles too"
 
+#: src/app/settings/account.tsx
+msgid "Approve"
+msgstr "Approve"
+
 #: src/app/sign-in/page.tsx
 msgid "Approved. Signing in…"
 msgstr "Approved. Signing in…"
@@ -632,6 +640,10 @@ msgstr "Artwork"
 #: src/features/party/in-party.tsx
 msgid "As the host"
 msgstr "As the host"
+
+#: src/components/media/sort-picker.tsx
+msgid "Ascending"
+msgstr "Ascending"
 
 #: src/app/settings/playback.tsx
 msgid "Ask if you are still watching"
@@ -987,6 +999,10 @@ msgstr "Clear selection"
 msgid "Close"
 msgstr "Close"
 
+#: src/app/settings/account.tsx
+msgid "Code"
+msgstr "Code"
+
 #: src/features/party/in-party.tsx
 msgid "Code copied"
 msgstr "Code copied"
@@ -997,6 +1013,7 @@ msgstr "Code or invite link"
 
 #: src/app/discover/page.tsx
 #: src/app/item/_components/collection.tsx
+#: src/app/search/page.tsx
 #: src/lib/format.ts
 msgid "Collections"
 msgstr "Collections"
@@ -1313,6 +1330,10 @@ msgstr "Custom link"
 msgid "Cyan"
 msgstr "Cyan"
 
+#: src/components/media/sort-picker.tsx
+msgid "Date added"
+msgstr "Date added"
+
 #: src/app/history/page.tsx
 msgid "Date not known"
 msgstr "Date not known"
@@ -1369,6 +1390,10 @@ msgstr "Delete all"
 #: src/features/playlists/playlists.tsx
 msgid "Delete playlist"
 msgstr "Delete playlist"
+
+#: src/components/media/sort-picker.tsx
+msgid "Descending"
+msgstr "Descending"
 
 #: src/app/settings/theme.tsx
 msgid "Desert"
@@ -1588,6 +1613,10 @@ msgstr "Engine"
 msgid "Enter"
 msgstr "Enter"
 
+#: src/app/settings/account.tsx
+msgid "Enter a code"
+msgstr "Enter a code"
+
 #: src/features/party/not-in-party.tsx
 msgid "Enter an invite link, or a code and its relay"
 msgstr "Enter an invite link, or a code and its relay"
@@ -1595,6 +1624,10 @@ msgstr "Enter an invite link, or a code and its relay"
 #: src/features/party/not-in-party.tsx
 msgid "Enter the address of a relay"
 msgstr "Enter the address of a relay"
+
+#: src/app/settings/account.tsx
+msgid "Enter the code the other device shows."
+msgstr "Enter the code the other device shows."
 
 #: src/app/sign-in/page.tsx
 msgid "Enter this code under Quick Connect in an app already signed in to this server."
@@ -1622,6 +1655,7 @@ msgid "Episode layout"
 msgstr "Episode layout"
 
 #: src/app/item/_components/seasons.tsx
+#: src/app/search/page.tsx
 #: src/app/settings/interface.tsx
 #: src/features/player/episodes.tsx
 #: src/features/player/options.tsx
@@ -1703,6 +1737,7 @@ msgstr "Faster"
 msgid "Favourite"
 msgstr "Favourite"
 
+#: src/app/discover/page.tsx
 #: src/app/favourites/page.tsx
 #: src/app/settings/apps.tsx
 #: src/app/settings/interface.tsx
@@ -2034,6 +2069,10 @@ msgstr "In Discover"
 #: src/lib/discord.ts
 msgid "In Favourites"
 msgstr "In Favourites"
+
+#: src/app/discover/page.tsx
+msgid "In progress"
+msgstr "In progress"
 
 #: src/lib/playback/sound.ts
 #: src/lib/subtitles/delay.ts
@@ -2503,6 +2542,7 @@ msgid "Mute key"
 msgstr "Mute key"
 
 #: src/app/settings/_components/version-settings.tsx
+#: src/components/media/sort-picker.tsx
 #: src/features/playlists/playlists.tsx
 msgid "Name"
 msgstr "Name"
@@ -2620,6 +2660,10 @@ msgstr "No channels in this group."
 #: src/app/item/_components/no-details.tsx
 msgid "No details for this title"
 msgstr "No details for this title"
+
+#: src/app/settings/account.tsx
+msgid "No device is waiting with that code."
+msgstr "No device is waiting with that code."
 
 #: src/features/downloads/download-button.tsx
 msgid "No episodes to download there"
@@ -3013,6 +3057,10 @@ msgstr "Options the app keeps for itself."
 #: src/app/settings/_components/reaction-setting.tsx
 msgid "Or type one"
 msgstr "Or type one"
+
+#: src/lib/playback/quality.ts
+msgid "Original"
+msgstr "Original"
 
 #: src/app/settings/audio.tsx
 msgid "Original language"
@@ -3519,6 +3567,12 @@ msgstr "Puts every key back the way it came."
 msgid "QR code"
 msgstr "QR code"
 
+#: src/app/settings/playback.tsx
+#: src/features/player/options.tsx
+msgid "Quality"
+msgstr "Quality"
+
+#: src/app/settings/account.tsx
 #: src/app/sign-in/page.tsx
 msgid "Quick Connect"
 msgstr "Quick Connect"
@@ -3577,6 +3631,7 @@ msgid "Rate season"
 msgstr "Rate season"
 
 #: src/components/media/scores.tsx
+#: src/components/media/sort-picker.tsx
 msgid "Rating"
 msgstr "Rating"
 
@@ -3639,6 +3694,10 @@ msgstr "Relay"
 #: src/features/party/not-in-party.tsx
 msgid "Relay address"
 msgstr "Relay address"
+
+#: src/components/media/sort-picker.tsx
+msgid "Release date"
+msgstr "Release date"
 
 #: src/app/item/_components/details.tsx
 msgid "Released"
@@ -3849,6 +3908,10 @@ msgstr "Rows, catalogs and the calendar."
 #: src/features/player/options.tsx
 msgid "Runs at a different speed to the video"
 msgstr "Runs at a different speed to the video"
+
+#: src/components/media/sort-picker.tsx
+msgid "Runtime"
+msgstr "Runtime"
 
 #. A season and episode number, as in S01E04
 #: src/lib/format.ts
@@ -4082,8 +4145,8 @@ msgid "Share the invite"
 msgstr "Share the invite"
 
 #: src/app/settings/playback.tsx
-msgid "Sharpens the lines and cleans up the compression in anime as it plays, most of all in older and lower-resolution shows. It applies to titles your catalogs mark as anime. With a keyboard, U in the player switches it for what's playing. Uses more power, and turns itself off for a video this device can't keep up with. HDR videos, and videos about as large as the screen, stay as they are."
-msgstr "Sharpens the lines and cleans up the compression in anime as it plays, most of all in older and lower-resolution shows. It applies to titles your catalogs mark as anime. With a keyboard, U in the player switches it for what's playing. Uses more power, and turns itself off for a video this device can't keep up with. HDR videos, and videos about as large as the screen, stay as they are."
+msgid "Sharpens the lines and cleans up the compression in anime as it plays, most of all in older and lower-resolution shows. It applies to titles marked as anime. With a keyboard, U in the player switches it for what's playing. Uses more power, and turns itself off for a video this device can't keep up with. HDR videos, and videos about as large as the screen, stay as they are."
+msgstr "Sharpens the lines and cleans up the compression in anime as it plays, most of all in older and lower-resolution shows. It applies to titles marked as anime. With a keyboard, U in the player switches it for what's playing. Uses more power, and turns itself off for a video this device can't keep up with. HDR videos, and videos about as large as the screen, stay as they are."
 
 #: src/lib/input/keys.ts
 msgid "Shift"
@@ -4168,8 +4231,8 @@ msgid "Shows"
 msgstr "Shows"
 
 #: src/app/settings/playback.tsx
-msgid "Shows a picture of the video where you point, drag or skip to on the seek bar. Each one reads a little of the file, so turn them off to save data."
-msgstr "Shows a picture of the video where you point, drag or skip to on the seek bar. Each one reads a little of the file, so turn them off to save data."
+msgid "Shows a picture of the video where you point, drag or skip to on the seek bar. Each one loads a little data, so turn them off to save it."
+msgstr "Shows a picture of the video where you point, drag or skip to on the seek bar. Each one loads a little data, so turn them off to save it."
 
 #: src/app/settings/playback.tsx
 msgid "Shows HDR video in HDR on a screen that can show it, instead of converting it to SDR. Leave it off on a screen without HDR."
@@ -4206,6 +4269,10 @@ msgstr "Side rail runs down the side of the screen; Top tabs sit along the top o
 #: src/app/settings/interface.tsx
 msgid "Sidebar"
 msgstr "Sidebar"
+
+#: src/app/settings/account.tsx
+msgid "Sign another device in as you, with the code it shows."
+msgstr "Sign another device in as you, with the code it shows."
 
 #: src/app/sign-in/page.tsx
 msgid "Sign in"
@@ -4368,6 +4435,10 @@ msgstr "something this device cannot read"
 #: src/features/party/in-party.tsx
 msgid "Something this device cannot read"
 msgstr "Something this device cannot read"
+
+#: src/components/media/sort-picker.tsx
+msgid "Sort by"
+msgstr "Sort by"
 
 #: src/app/settings/audio.tsx
 #: src/app/settings/interface.tsx
@@ -4772,6 +4843,10 @@ msgstr "The app's player"
 msgid "The app's player and its options, such as starting videos in landscape."
 msgstr "The app's player and its options, such as starting videos in landscape."
 
+#: src/app/settings/account.tsx
+msgid "The device is signed in"
+msgstr "The device is signed in"
+
 #: src/lib/party/party.ts
 msgid "The host removed you from the party."
 msgstr "The host removed you from the party."
@@ -4808,6 +4883,10 @@ msgstr "the live stream stopped"
 #: src/app/settings/playback.tsx
 msgid "The mini player keeps the video going over the pages while you look around. Tap it to open the player again, or close it with its cross."
 msgstr "The mini player keeps the video going over the pages while you look around. Tap it to open the player again, or close it with its cross."
+
+#: src/app/settings/playback.tsx
+msgid "The most a version may stream at. Above it, the server converts it down, which helps on a slow connection. Original plays every version as it is. The player's own quality menu changes this too."
+msgstr "The most a version may stream at. Above it, the server converts it down, which helps on a slow connection. Original plays every version as it is. The player's own quality menu changes this too."
 
 #: src/app/settings/apps.tsx
 msgid "The movie or show whose page is open."
@@ -4874,9 +4953,19 @@ msgid "The same for episodes marked as a recap."
 msgstr "The same for episodes marked as a recap."
 
 #. Follows "Playback failed:"
+#: src/lib/playback/transcoding.ts
+msgid "the server could not convert this version"
+msgstr "the server could not convert this version"
+
+#. Follows "Playback failed:"
 #: src/lib/playback/use-player.ts
 msgid "the stream ended early"
 msgstr "the stream ended early"
+
+#. Follows "Playback failed:"
+#: src/lib/playback/video.ts
+msgid "the stream stopped loading"
+msgstr "the stream stopped loading"
 
 #: src/app/settings/apps.tsx
 msgid "The title, the episode and the time left."
@@ -5008,6 +5097,10 @@ msgstr "This server"
 msgid "This server can't list what you've watched."
 msgstr "This server can't list what you've watched."
 
+#: src/app/settings/_components/common.tsx
+msgid "This server doesn't let your account change these."
+msgstr "This server doesn't let your account change these."
+
 #: src/app/item/_components/no-details.tsx
 msgid "This server has no details for {id}."
 msgstr "This server has no details for {id}."
@@ -5088,8 +5181,8 @@ msgid "Title pages"
 msgstr "Title pages"
 
 #: src/app/settings/interface.tsx
-msgid "Titles, synopses and stream names stay in the language your addons send."
-msgstr "Titles, synopses and stream names stay in the language your addons send."
+msgid "Titles, synopses and version names stay in the language the server sends."
+msgstr "Titles, synopses and version names stay in the language the server sends."
 
 #: src/app/calendar/page.tsx
 #: src/app/live-tv/page.tsx
@@ -5152,6 +5245,7 @@ msgstr "Troubleshooting"
 #: src/components/media/random-pick.tsx
 #: src/features/party/not-in-party.tsx
 #: src/features/versions/version-list.tsx
+#: src/lib/playback/transcoding.ts
 #: src/lib/playback/use-player.ts
 msgid "Try again"
 msgstr "Try again"
@@ -5251,8 +5345,8 @@ msgid "Up next: {upNext}"
 msgstr "Up next: {upNext}"
 
 #: src/app/settings/interface.tsx
-msgid "Up to {MAX_FEATURED}, mixed together. Left empty, your first movie and series catalogs are featured."
-msgstr "Up to {MAX_FEATURED}, mixed together. Left empty, your first movie and series catalogs are featured."
+msgid "Up to {MAX_FEATURED}, mixed together. Left empty, your first movie and show libraries are featured."
+msgstr "Up to {MAX_FEATURED}, mixed together. Left empty, your first movie and show libraries are featured."
 
 #: src/lib/hosts/shell/index.ts
 msgid "Up to date."
@@ -5479,6 +5573,7 @@ msgstr "Watch party"
 msgid "Watch together"
 msgstr "Watch together"
 
+#: src/app/discover/page.tsx
 #: src/app/history/page.tsx
 #: src/app/item/_components/actions.tsx
 msgid "Watched"

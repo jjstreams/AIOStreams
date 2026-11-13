@@ -42,6 +42,8 @@ import {
   type SegmentType,
 } from '@/lib/settings';
 import { useFeature } from '@/lib/jellyfin/server-info';
+import { useSession } from '@/lib/jellyfin/session';
+import { mayConvert, qualityOptions } from '@/lib/playback/quality';
 import { canMinimise } from '@/lib/playback/session';
 import { SettingsCard, SettingsRow } from './_components/settings-card';
 import { BadgesRow, QuickFiltersRow } from './_components/version-settings';
@@ -103,7 +105,7 @@ function SegmentActionSelect({ type }: { type: SegmentType }) {
 }
 
 export function PlaybackSection() {
-  const { prefs, update } = usePlaybackPrefs();
+  const { prefs, update, locked } = usePlaybackPrefs();
   const [seekStep, setSeekStep] = useSetting(settings.controls.seekStep);
   const [volumeStep, setVolumeStep] = useSetting(settings.controls.volumeStep);
   const [holdRate, setHoldRate] = useSetting(settings.controls.holdRate);
@@ -194,6 +196,7 @@ export function PlaybackSection() {
               : t`Counts down, then plays the next episode. Off, the prompt waits for you.`
           }
           value={autoplay}
+          disabled={locked}
           onValueChange={(v) => update({ EnableNextEpisodeAutoPlay: v })}
         />
         <Switch
@@ -388,15 +391,13 @@ export function PlaybackSection() {
           value={clock}
           onValueChange={setClock}
         />
-        {shell && (
-          <Switch
-            side="right"
-            label={t`Seek bar previews`}
-            help={t`Shows a picture of the video where you point, drag or skip to on the seek bar. Each one reads a little of the file, so turn them off to save data.`}
-            value={thumbnails}
-            onValueChange={setThumbnails}
-          />
-        )}
+        <Switch
+          side="right"
+          label={t`Seek bar previews`}
+          help={t`Shows a picture of the video where you point, drag or skip to on the seek bar. Each one loads a little data, so turn them off to save it.`}
+          value={thumbnails}
+          onValueChange={setThumbnails}
+        />
       </SettingsCard>
       {shell && (
         <SettingsCard name="video" title={t`Video`} description={onDevice()}>
@@ -509,7 +510,7 @@ function UpscalingSwitch() {
     <Switch
       side="right"
       label={t`Anime upscaling`}
-      help={t`Sharpens the lines and cleans up the compression in anime as it plays, most of all in older and lower-resolution shows. It applies to titles your catalogs mark as anime. With a keyboard, U in the player switches it for what's playing. Uses more power, and turns itself off for a video this device can't keep up with. HDR videos, and videos about as large as the screen, stay as they are.`}
+      help={t`Sharpens the lines and cleans up the compression in anime as it plays, most of all in older and lower-resolution shows. It applies to titles marked as anime. With a keyboard, U in the player switches it for what's playing. Uses more power, and turns itself off for a video this device can't keep up with. HDR videos, and videos about as large as the screen, stay as they are.`}
       value={upscaling}
       onValueChange={setUpscaling}
     />
@@ -523,6 +524,8 @@ function PlayerCard() {
   const browserEngine = engine === 'browser' ? engine : 'webgpu';
   const [cacheSize, setCacheSize] = useSetting(settings.player.cacheSize);
   const [back, setBack] = useSetting(settings.player.back);
+  const [quality, setQuality] = useSetting(settings.player.quality);
+  const { user } = useSession();
   const found = useExternalPlayers();
   const launched = LAUNCHED_PLAYERS.find((p) => p.id === player);
   const preset = linkPreset(player);
@@ -639,6 +642,18 @@ function PlayerCard() {
             onValueChange={(v) => setCacheSize(v as CacheSize)}
           />
         </>
+      )}
+      {mayConvert(user) && !launched && !preset && player !== CUSTOM_LINK && (
+        <Select
+          label={t`Quality`}
+          help={t`The most a version may stream at. Above it, the server converts it down, which helps on a slow connection. Original plays every version as it is. The player's own quality menu changes this too.`}
+          options={qualityOptions().map(({ id, label }) => ({
+            value: id,
+            label,
+          }))}
+          value={String(quality)}
+          onValueChange={(v) => setQuality(Number(v))}
+        />
       )}
       {launched && (
         <SettingsRow

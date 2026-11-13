@@ -8,7 +8,7 @@ import type { SubtitleLine } from '@/lib/subtitles/cues';
 import { subtitleType, type SubtitleFacts } from '@/lib/subtitles/tracks';
 import { tagName } from '@/lib/languages';
 import type { Playhead } from './playhead';
-import type { ThumbnailFeed } from './thumbnails';
+import type { Open, ThumbnailFeed } from './thumbnails';
 import type { PlannedSkip, StatsRow, VideoFrame } from './engine';
 import type { PlaybackPrefs } from '@/lib/jellyfin/user-config';
 import type {
@@ -51,11 +51,14 @@ export interface PlayerState {
   reconnecting?: boolean;
   /** The sound goes out undecoded, which a change of speed can't stretch. */
   passthrough?: boolean;
+  /** The server's conversion that plays in place of the file, which reports name. */
+  stream?: { playSessionId: string | null; liveStreamId?: string };
 }
 
 /** What some players add to what a browser's video can do. */
+/** `anyFormat`: opens any container and codec. */
 export type PlayerFeature =
-  'audio' | 'chapters' | 'stats' | 'headers' | 'upscaling';
+  'audio' | 'chapters' | 'stats' | 'headers' | 'upscaling' | 'anyFormat';
 
 /** Engines that list a file's audio tracks let the page's own video switch them. */
 export const browserFeatures: readonly PlayerFeature[] =
@@ -186,6 +189,10 @@ export interface PlayerOptions {
   /** Kept from the saved volume, which it leaves alone. */
   muted?: boolean;
   thumbnails?: boolean;
+  /** The title's chapters, for an engine that reads none from the file. */
+  chapters?: Chapter[];
+  /** Seek bar pictures that need no read of the file, taken over the engine's own. */
+  pictures?: Open | null;
 }
 
 export const VOLUME_KEY = 'aiostreams-web-volume';

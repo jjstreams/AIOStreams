@@ -11,7 +11,7 @@ import {
 } from '@tanstack/react-query';
 import type { JellyfinClient } from './client';
 import { useSession } from './session';
-import { useFeature } from './server-info';
+import { useFeature, useServerInfo } from './server-info';
 import { settings, useSetting } from '@/lib/settings';
 import { episodeMarks, lacksDetails, pickable } from '@/lib/format';
 import type {
@@ -21,6 +21,9 @@ import type {
 } from './types';
 
 export const PAGE = 60;
+
+/** Jellyfin's sort for what was added last. */
+export const NEWEST = 'DateCreated,SortName';
 
 /** Every key starts here, so a user switch or sign-out drops them all. */
 export function useKey() {
@@ -136,12 +139,13 @@ export function mergeRows(
     .sort((a, b) => watchedAt(b) - watchedAt(a));
 }
 
-export type ItemFilter = 'unplayed' | 'played' | 'favorite';
+export type ItemFilter = 'unplayed' | 'played' | 'favorite' | 'resumable';
 
 const FILTERS: Record<ItemFilter, string> = {
   unplayed: 'IsUnplayed',
   played: 'IsPlayed',
   favorite: 'IsFavorite',
+  resumable: 'IsResumable',
 };
 
 /**
@@ -157,6 +161,9 @@ export function useItemPages(
     genreId?: string;
     recursive?: boolean;
     enabled?: boolean;
+    /** Jellyfin's sort names, without which a catalog keeps its own order. */
+    sortBy?: string;
+    descending?: boolean;
   } = {}
 ) {
   const { client, user } = useSession();
@@ -171,6 +178,8 @@ export function useItemPages(
       opts.genreId,
       opts.recursive,
       pageSize,
+      opts.sortBy,
+      opts.descending,
     ],
     meta: { cache: 'home' },
     initialPageParam: 0,
@@ -184,6 +193,12 @@ export function useItemPages(
         GenreIds: opts.genreId,
         Recursive: opts.recursive,
         Filters: opts.filter ? FILTERS[opts.filter] : undefined,
+        SortBy: opts.sortBy,
+        SortOrder: opts.sortBy
+          ? opts.descending
+            ? 'Descending'
+            : 'Ascending'
+          : undefined,
         EnableTotalRecordCount: true,
       }),
     getNextPageParam: (last, pages) => {
@@ -203,6 +218,7 @@ export function useLibraryHeads(views: BaseItemDto[], limit: number) {
   const queryClient = useQueryClient();
   const genres = useGenresOptions();
   const genreRequired = useFeature('genreRequired');
+  const { stock } = useServerInfo();
   return useQueries({
     queries: views.map((view) => ({
       queryKey: [...key, 'head', view.Id, limit],
@@ -221,6 +237,7 @@ export function useLibraryHeads(views: BaseItemDto[], limit: number) {
           GenreIds: defaultGenre(offered?.Items, required)?.Id,
           Recursive: true,
           Limit: limit,
+          ...(stock && { SortBy: NEWEST, SortOrder: 'Descending' }),
         });
       },
       staleTime: 5 * 60_000,
@@ -378,6 +395,7 @@ export function useSearchSuggestions(
 /* eslint-disable lingui/no-unlocalized-strings -- Jellyfin's field names */
 const DETAIL_FIELDS = [
   'AirTime',
+  'Chapters',
   'ExternalUrls',
   'Genres',
   'Overview',
@@ -388,6 +406,7 @@ const DETAIL_FIELDS = [
   'RemoteTrailers',
   'Studios',
   'Taglines',
+  'Trickplay',
 ].join(',');
 /* eslint-enable lingui/no-unlocalized-strings */
 

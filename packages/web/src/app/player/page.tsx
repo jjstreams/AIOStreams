@@ -17,6 +17,7 @@ import { cn } from '@aiostreams/ui/core/styling';
 import { useSession } from '@/lib/jellyfin/session';
 import { useItem } from '@/lib/jellyfin/queries';
 import {
+  useMaxBitrate,
   usePlaybackInfo,
   usePlaybackInfoOptions,
   useSegments,
@@ -48,6 +49,13 @@ import type { EngineFactory, StatsRow } from '@/lib/playback/engine';
 import { videoEngine } from '@/lib/playback/video';
 import { playsWithWebGpu } from '@/lib/playback/player-choice';
 import { webGpuEngine } from '@/lib/playback/webgpu';
+import {
+  transcodes,
+  transcodeServer,
+  transcodingEngine,
+} from '@/lib/playback/transcoding';
+import { mayConvert } from '@/lib/playback/quality';
+import { serverChapters, trickplayFeed } from '@/lib/playback/trickplay';
 import { useNowPlaying } from '@/lib/playback/now-playing';
 import { usePlayingAnime } from '@/lib/playback/upscaling';
 import {
@@ -142,6 +150,7 @@ interface PlayerProps {
   onCovered(covered: boolean): void;
   /** The playlist it was started from. */
   playlist?: string;
+  onQuality?(bitrate: number, positionMs: number): void;
 }
 
 /**
@@ -218,8 +227,14 @@ export function PlayerPage({
   // Pinned once found: a refreshed version list must not restart playback.
   const [playing, setPlaying] = React.useState<Omit<
     PlayerProps,
-    'startMs' | 'onCovered' | 'playlist' | 'mini'
+    'startMs' | 'onCovered' | 'playlist' | 'mini' | 'onQuality'
   > | null>(null);
+  const [restart, setRestart] = React.useState<{ at: number; n: number }>();
+  const changeQuality = React.useCallback((bitrate: number, at: number) => {
+    settings.player.quality.write(bitrate);
+    setRestart((r) => ({ at, n: (r?.n ?? 0) + 1 }));
+    setPlaying(null);
+  }, []);
   const [covered, setCovered] = React.useState(true);
   const sources = local ? [local.source!] : playableSources(info.data);
   const source = named ? sources.find((s) => s.Id === named) : sources[0];
@@ -317,11 +332,13 @@ export function PlayerPage({
       {playing ? (
         <VersionPickerProvider>
           <Player
+            key={restart?.n}
             {...playing}
-            startMs={startMs}
+            startMs={restart?.at ?? startMs}
             playlist={playlist}
             onCovered={setCovered}
             mini={mini}
+            onQuality={changeQuality}
           />
         </VersionPickerProvider>
       ) : loading ? null : (
@@ -435,7 +452,10 @@ function useReporting(
   const refreshAll = useRefreshAll();
   const refresh = React.useRef(refreshAll);
   refresh.current = refreshAll;
-  const { started, paused } = player.state;
+  const { started, paused, stream } = player.state;
+  const session = stream ? stream.playSessionId : playSessionId;
+  const liveStreamId = stream?.liveStreamId;
+  const transcoded = !!stream;
   // A server that sends the object without the feature numbers versions by position.
   const lasting = useFeature('versions') || !source.aiostreams;
 
@@ -455,9 +475,10 @@ function useReporting(
       {
         itemId: item.Id!,
         mediaSourceId: source.Id!,
-        playSessionId,
+        playSessionId: session,
         userId: user.Id,
         live,
+        transcode: transcoded ? { liveStreamId } : undefined,
       },
       () => ({
         ms: player.playhead.positionMs,
@@ -478,7 +499,17 @@ function useReporting(
       });
       reporter.current = null;
     };
-  }, [started, client, user.Id, item.Id, source.Id, playSessionId, live]);
+  }, [
+    started,
+    client,
+    user.Id,
+    item.Id,
+    source.Id,
+    session,
+    live,
+    transcoded,
+    liveStreamId,
+  ]);
 
   React.useEffect(() => {
     reporter.current?.progress(paused ? 'Pause' : 'Unpause');
@@ -736,10 +767,29 @@ function Player({
   onCovered,
   playlist,
   mini,
+  onQuality,
 }: PlayerProps) {
-  const { client } = useSession();
+  const { client, user } = useSession();
   const video = React.useRef<HTMLVideoElement>(null);
   const [hostPlayer] = React.useState(() => currentHost().player);
+  const maxBitrate = useMaxBitrate();
+  // A version the server converts plays its conversion; one the page's
+  // engines can't read goes to it last.
+  const [engines] = React.useState((): EngineFactory[] => {
+    const page = () => videoEngine(video);
+    if (local?.local || youTube)
+      return hostPlayer ? [hostPlayer] : pageEngines(video);
+    const server = transcodeServer(client, user.Id!, item.Id!, maxBitrate);
+    if (transcodes(source))
+      return [transcodingEngine(hostPlayer ?? page(), server)];
+    if (hostPlayer) return [hostPlayer];
+    return [
+      ...pageEngines(video),
+      ...(source.SupportsTranscoding
+        ? [transcodingEngine(page(), server)]
+        : []),
+    ];
+  });
   usePlayingAnime(item);
   const close = React.useRef<() => void>(undefined);
   const ended = useEnded(item, mini, () => close.current?.());
@@ -794,7 +844,24 @@ function Player({
     },
     [local]
   );
-  const own = usePlayer(hostPlayer ? [hostPlayer] : pageEngines(video), {
+  const [quality] = useSetting(settings.player.quality);
+  const convertible =
+    !!onQuality &&
+    !!source.SupportsTranscoding &&
+    mayConvert(user) &&
+    !local?.local &&
+    !youTube &&
+    !launched;
+  // A download plays offline, and a YouTube video has none of these.
+  const fromServer = React.useMemo(() => {
+    if (local?.local || youTube) return {};
+    const chapters = serverChapters(item);
+    return {
+      chapters: chapters.length ? chapters : undefined,
+      pictures: trickplayFeed(client, item, source),
+    };
+  }, [local, youTube, client, item, source]);
+  const own = usePlayer(engines, {
     client,
     item,
     url: local?.local
@@ -821,6 +888,8 @@ function Player({
     subtitleStyle,
     launched,
     startPaused,
+    chapters: fromServer.chapters,
+    pictures: fromServer.pictures,
   });
   const player = usePartyPlayer(own, playlistItemId);
   close.current = player.close;
@@ -1014,6 +1083,15 @@ function Player({
                       : undefined
                   }
                   onParty={together}
+                  quality={
+                    convertible
+                      ? {
+                          value: quality,
+                          select: (bitrate) =>
+                            onQuality(bitrate, player.playhead.positionMs),
+                        }
+                      : undefined
+                  }
                   live={!!source.IsInfiniteStream}
                 />
               )}
