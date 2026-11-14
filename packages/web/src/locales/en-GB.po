@@ -366,6 +366,10 @@ msgstr "A remote's or gamepad's buttons work too."
 msgid "A set time before the end."
 msgstr "A set time before the end."
 
+#: src/app/settings/playback.tsx
+msgid "A small window with the player in it: subtitles, controls and the seek bar. The browser adds a bar of its own at the top."
+msgstr "A small window with the player in it: subtitles, controls and the seek bar. The browser adds a bar of its own at the top."
+
 #: src/app/settings/audio.tsx
 msgid "A track the version marks as its default plays even when another is in one of your languages. Turn this off for your languages to always win."
 msgstr "A track the version marks as its default plays even when another is in one of your languages. Turn this off for your languages to always win."
@@ -715,11 +719,14 @@ msgid "Back in the player"
 msgstr "Back in the player"
 
 #: src/app/settings/_components/version-settings.tsx
-#: src/app/settings/interface.tsx
 #: src/app/settings/subtitles.tsx
 #: src/app/settings/theme.tsx
 msgid "Background"
 msgstr "Background"
+
+#: src/app/settings/theme.tsx
+msgid "Background from artwork"
+msgstr "Background from artwork"
 
 #: src/lib/input/keys.ts
 msgid "Backspace"
@@ -1862,7 +1869,7 @@ msgstr "Frame timings"
 msgid "From the start"
 msgstr "From the start"
 
-#: src/app/settings/interface.tsx
+#: src/app/settings/theme.tsx
 msgid "Frosted glass"
 msgstr "Frosted glass"
 
@@ -1883,6 +1890,14 @@ msgstr "General"
 #: src/components/send-report.tsx
 msgid "Give this code to whoever looks into it."
 msgstr "Give this code to whoever looks into it."
+
+#: src/app/settings/theme.tsx
+msgid "Glass panels"
+msgstr "Glass panels"
+
+#: src/app/settings/theme.tsx
+msgid "Glass surface"
+msgstr "Glass surface"
 
 #: src/app/settings/apps.tsx
 msgid "GLSL shader files for the built-in mpv, applied in name order to what plays. Heavy ones can make video stutter."
@@ -2295,7 +2310,7 @@ msgstr "Licences"
 msgid "Link a pack someone shares, in this app's format or the one Fusion and Nuvio use. It stays up to date with its author's changes."
 msgstr "Link a pack someone shares, in this app's format or the one Fusion and Nuvio use. It stays up to date with its author's changes."
 
-#: src/app/settings/interface.tsx
+#: src/app/settings/theme.tsx
 msgid "Liquid glass"
 msgstr "Liquid glass"
 
@@ -2414,6 +2429,10 @@ msgstr "Medium"
 #: src/lib/input/keys.ts
 msgid "Menu key"
 msgstr "Menu key"
+
+#: src/app/settings/theme.tsx
+msgid "Menus, lists, fields and cards over the artwork sit on the glass surface instead of its colour. Slower devices can feel the extra drawing."
+msgstr "Menus, lists, fields and cards over the artwork sit on the glass surface instead of its colour. Slower devices can feel the extra drawing."
 
 #: src/app/settings/interface.tsx
 msgid "Merge continue watching and next up"
@@ -2900,6 +2919,10 @@ msgstr "Older ones wait for the server instead. Without a connection, everything
 msgid "on {relay}"
 msgstr "on {relay}"
 
+#: src/app/settings/interface.tsx
+msgid "On home while the hero rotates, and in grids. In a grid, and under a mouse, a card pops out, so the cards beside it stay put."
+msgstr "On home while the hero rotates, and in grids. In a grid, and under a mouse, a card pops out, so the cards beside it stay put."
+
 #: src/lib/discord.ts
 msgid "On the calendar"
 msgstr "On the calendar"
@@ -3242,6 +3265,7 @@ msgid "Pick the version to download."
 msgstr "Pick the version to download."
 
 #: src/app/settings/apps.tsx
+#: src/app/settings/playback.tsx
 #: src/features/player/options.tsx
 msgid "Picture-in-picture"
 msgstr "Picture-in-picture"
@@ -3421,6 +3445,10 @@ msgstr "Player"
 msgid "Player link"
 msgstr "Player link"
 
+#: src/app/settings/playback.tsx
+msgid "Player window"
+msgstr "Player window"
+
 #: src/app/history/_components/sessions.tsx
 #: src/app/item/_components/trailer.tsx
 #: src/features/party/in-party.tsx
@@ -3434,6 +3462,10 @@ msgstr "Playing"
 #: src/app/player/page.tsx
 msgid "Playing in {launchedName}"
 msgstr "Playing in {launchedName}"
+
+#: src/app/player/page.tsx
+msgid "Playing in picture-in-picture"
+msgstr "Playing in picture-in-picture"
 
 #: src/features/versions/external-prompt.tsx
 msgid "Playing in your player"
@@ -4419,7 +4451,7 @@ msgstr "Small labels on each version for what it has, from packs you link or bad
 msgid "Smaller subtitles"
 msgstr "Smaller subtitles"
 
-#: src/app/settings/interface.tsx
+#: src/app/settings/theme.tsx
 msgid "Solid"
 msgstr "Solid"
 
@@ -4843,6 +4875,10 @@ msgstr "The app's player"
 msgid "The app's player and its options, such as starting videos in landscape."
 msgstr "The app's player and its options, such as starting videos in landscape."
 
+#: src/app/settings/theme.tsx
+msgid "The artwork of the title you're on, blurred and darkened, behind the pages and the version list."
+msgstr "The artwork of the title you're on, blurred and darkened, behind the pages and the version list."
+
 #: src/app/settings/account.tsx
 msgid "The device is signed in"
 msgstr "The device is signed in"
@@ -5052,6 +5088,10 @@ msgstr "This browser keeps no files for this site."
 #: src/app/settings/playback.tsx
 msgid "This browser's own player, which plays the formats this browser supports."
 msgstr "This browser's own player, which plays the formats this browser supports."
+
+#: src/app/settings/playback.tsx
+msgid "This browser's own window of the video alone, without that bar, but with no subtitles and only the browser's play and pause."
+msgstr "This browser's own window of the video alone, without that bar, but with no subtitles and only the browser's play and pause."
 
 #: src/app/sign-in/page.tsx
 msgid "This code has expired."
@@ -5479,6 +5519,10 @@ msgstr "Versions play in this browser. Choose another player to open them in it 
 msgid "Video"
 msgstr "Video"
 
+#: src/app/settings/playback.tsx
+msgid "Video only"
+msgstr "Video only"
+
 #: src/app/settings/apps.tsx
 msgid "Video output"
 msgstr "Video output"
@@ -5620,9 +5664,9 @@ msgstr "What others send shows over the video for a few seconds. It always stays
 msgid "What the app did each day, kept for a week."
 msgstr "What the app did each day, kept for a week."
 
-#: src/app/settings/interface.tsx
-msgid "What the navigation sits on over the page: the app's own colour, or glass that shows the page through it. Liquid glass also bends what's behind its edges, which costs more on a slow device."
-msgstr "What the navigation sits on over the page: the app's own colour, or glass that shows the page through it. Liquid glass also bends what's behind its edges, which costs more on a slow device."
+#: src/app/settings/theme.tsx
+msgid "What the navigation, and glass panels over the artwork, sit on: the app's own colour, or glass that shows the page through it. Liquid glass also bends what's behind the navigation's edges, which costs more on a slow device."
+msgstr "What the navigation, and glass panels over the artwork, sit on: the app's own colour, or glass that shows the page through it. Liquid glass also bends what's behind the navigation's edges, which costs more on a slow device."
 
 #: src/features/party/chat.tsx
 msgid "What the others say shows here."
@@ -5731,10 +5775,6 @@ msgstr "While a channel plays. On a TV, up and down change channel too, and the 
 #: src/app/settings/_components/shortcut-settings.tsx
 msgid "While syncing subtitles by ear."
 msgstr "While syncing subtitles by ear."
-
-#: src/app/settings/interface.tsx
-msgid "While the hero rotates. Under a mouse a card always pops out, so the cards beside it stay put."
-msgstr "While the hero rotates. Under a mouse a card always pops out, so the cards beside it stay put."
 
 #: src/app/settings/interface.tsx
 msgid "While you're in it"

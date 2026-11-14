@@ -26,6 +26,10 @@ import { pageRtl } from '@/lib/direction';
 import { useHold } from '@/hooks/use-hold';
 import { useLatest } from '@/hooks/use-latest';
 import { CachedImage } from '@/components/cached-image';
+import {
+  releaseArtSelection,
+  useArtBackground,
+} from '@/lib/artwork/background';
 import { GlideLayers } from '@/components/shell/glide-layers';
 import {
   TrailerPreview,
@@ -52,12 +56,12 @@ function Shade() {
       <div
         data-ui="hero-shade"
         data-name="side"
-        className="absolute inset-0 bg-gradient-to-r from-[--background] via-[--background]/70 via-35% to-transparent max-sm:hidden rtl:bg-gradient-to-l"
+        className="absolute inset-0 bg-[--background] [mask-image:linear-gradient(to_right,black,rgb(0_0_0/0.7)_35%,transparent)] max-sm:hidden rtl:[mask-image:linear-gradient(to_left,black,rgb(0_0_0/0.7)_35%,transparent)]"
       />
       <div
         data-ui="hero-shade"
         data-name="bottom"
-        className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-[--background] via-[--background]/60 to-transparent max-sm:h-1/2"
+        className="absolute inset-x-0 bottom-0 h-2/3 bg-[--background] [mask-image:linear-gradient(to_top,black,rgb(0_0_0/0.6),transparent)] max-sm:h-1/2"
       />
     </>
   );
@@ -622,9 +626,9 @@ function HeroTrailer({
       <div className="absolute -inset-px">
         {fades && (
           <>
-            <div className="absolute inset-y-0 start-0 w-2/5 bg-gradient-to-r from-[--background] via-[--background]/60 via-30% to-transparent rtl:bg-gradient-to-l" />
-            <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-[--background] via-[--background]/60 via-30% to-transparent" />
-            <div className="absolute inset-x-0 top-0 h-[12%] bg-gradient-to-b from-[--background]/70 to-transparent" />
+            <div className="absolute inset-y-0 start-0 w-2/5 bg-[--background] [mask-image:linear-gradient(to_right,black,rgb(0_0_0/0.6)_30%,transparent)] rtl:[mask-image:linear-gradient(to_left,black,rgb(0_0_0/0.6)_30%,transparent)]" />
+            <div className="absolute inset-x-0 bottom-0 h-2/5 bg-[--background] [mask-image:linear-gradient(to_top,black,rgb(0_0_0/0.6)_30%,transparent)]" />
+            <div className="absolute inset-x-0 top-0 h-[12%] bg-[--background] [mask-image:linear-gradient(to_bottom,rgb(0_0_0/0.7),transparent)]" />
           </>
         )}
         <TrailerVeil shown={shown} />
@@ -634,6 +638,7 @@ function HeroTrailer({
           item={item}
           spot={spot}
           within={spot.parentElement ?? undefined}
+          soft
           onShown={(on) => {
             setShown(on);
             onShown(on);
@@ -656,6 +661,7 @@ export function Hero({
   const { client } = useSession();
   const featured = items.filter((i) => backdropSrc(client, i));
   const [index, setIndex] = React.useState(0);
+  useArtBackground(featured[index]);
   const [seconds] = useSetting(settings.interface.heroSeconds);
   const [paused, setPaused] = React.useState(false);
   const [dragging, setDragging] = React.useState(false);
@@ -664,6 +670,10 @@ export function Hero({
   const [slots, setSlots] = React.useState<[number, number, number]>([0, 1, 2]);
   // Only a title the user went to plays its trailer, not one the page opened on.
   const [chosen, setChosen] = React.useState(false);
+  // A title picked here takes the background back from a card rested on.
+  React.useEffect(() => {
+    if (chosen) releaseArtSelection();
+  }, [chosen, index]);
   const swipe = useSwipeFade((step) => {
     setChosen(true);
     setIndex((i) => (i + step + featured.length) % featured.length);
@@ -791,6 +801,7 @@ export function Hero({
     >
       {trailer.box}
       <div
+        data-ui="hero-art"
         // Fades out at its edge, where some GPUs draw the art's last row past
         // the shade. Not on the art's own box, which moves as the page scrolls.
         className="absolute inset-0 [mask-image:linear-gradient(to_top,transparent,black_2px)]"
@@ -933,9 +944,11 @@ function FollowBackdrop({
       className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
     >
       {box}
-      <BackdropFrame className={cn('max-w-[calc(100vh*2.6)]', fade)}>
-        <Backdrops current={src} />
-      </BackdropFrame>
+      <div data-ui="hero-art" className="absolute inset-0">
+        <BackdropFrame className={cn('max-w-[calc(100vh*2.6)]', fade)}>
+          <Backdrops current={src} />
+        </BackdropFrame>
+      </div>
       <Shade />
     </div>
   );
@@ -1032,6 +1045,7 @@ export function FollowHero({
     };
   }, [scroller]);
   const item = picked ?? items.find((i) => backdropSrc(client, i)) ?? items[0];
+  useArtBackground(item);
   const trailer = useHeroTrailer(resting, true);
 
   return (

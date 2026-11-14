@@ -21,6 +21,8 @@ import type {
 } from './types';
 
 export const PAGE = 60;
+/** Within most catalogs' own page, so the first answer waits on one upstream page. */
+const FIRST_PAGE = 20;
 
 /** Jellyfin's sort for what was added last. */
 export const NEWEST = 'DateCreated,SortName';
@@ -123,7 +125,13 @@ export function watchedAt(item: BaseItemDto): number {
   return (at && Date.parse(at)) || 0;
 }
 
-/** Most recently watched first; next episodes without times stay after resume points. */
+export function upNextAt(item: BaseItemDto): number {
+  const watched = watchedAt(item);
+  const aired = Date.parse(item.PremiereDate ?? '') || 0;
+  return watched && Math.max(watched, Math.min(aired, Date.now()));
+}
+
+/** Most recently watched or aired first; next episodes without times stay after resume points. */
 export function mergeRows(
   resume: BaseItemDto[] | null | undefined,
   nextUp: BaseItemDto[] | null | undefined
@@ -136,7 +144,7 @@ export function mergeRows(
       keys.forEach((k) => seen.add(k));
       return true;
     })
-    .sort((a, b) => watchedAt(b) - watchedAt(a));
+    .sort((a, b) => upNextAt(b) - upNextAt(a));
 }
 
 export type ItemFilter = 'unplayed' | 'played' | 'favorite' | 'resumable';
@@ -188,7 +196,7 @@ export function useItemPages(
         userId: user.Id,
         ParentId: parentId,
         StartIndex: pageParam,
-        Limit: pageSize,
+        Limit: pageParam ? pageSize : Math.min(pageSize, FIRST_PAGE),
         IncludeItemTypes: opts.types,
         GenreIds: opts.genreId,
         Recursive: opts.recursive,
