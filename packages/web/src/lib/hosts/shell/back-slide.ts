@@ -5,6 +5,7 @@ import {
   runAction,
 } from '@/lib/input';
 import { UNDER_OPACITY, UNDER_SHIFT } from '@/lib/page-open';
+import { washCopy } from '@/lib/artwork/background';
 
 const GLIDE = { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' };
 /** Longer than `history.back` takes to land. */
@@ -89,6 +90,23 @@ function hideHome(home: HTMLElement) {
   home.style.opacity = '';
 }
 
+/** The artwork behind the pages, which the page's own background hides while it slides. */
+function carryWash(page: HTMLElement) {
+  const wash = washCopy();
+  if (!wash) return;
+  const box = page.getBoundingClientRect();
+  const { clientWidth, clientHeight } = document.documentElement;
+  Object.assign(wash.style, {
+    position: 'absolute',
+    left: `${-box.left}px`,
+    top: `${-box.top}px`,
+    width: `${clientWidth}px`,
+    height: `${clientHeight}px`,
+    zIndex: '-10',
+  });
+  page.prepend(wash);
+}
+
 function glide(page: HTMLElement, to: string, done: () => void) {
   const from = page.style.transform;
   page.style.transform = to;
@@ -98,6 +116,7 @@ function glide(page: HTMLElement, to: string, done: () => void) {
 function release(page: HTMLElement) {
   page.style.transform = '';
   page.removeAttribute('data-sliding');
+  page.querySelector(':scope > [data-ui=art-wash]')?.remove();
 }
 
 function leave({ page, home }: Slide) {
@@ -137,6 +156,7 @@ export function backGesture(
       showHome(home);
     }
     page.toggleAttribute('data-sliding', true);
+    carryWash(page);
     slide = { page, side, home };
     return;
   }

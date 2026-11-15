@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "POT-Creation-Date: 2026-10-16 20:39+0100\n"
-"PO-Revision-Date: 2026-11-13 21:32+0000\n"
+"PO-Revision-Date: 2026-11-14 14:45+0000\n"
 "Last-Translator: Nicola Bortoletto <translate@nicolabortoletto.com>\n"
 "Language-Team: Italian <https://hosted.weblate.org/projects/aiostreams/web-app/it/>\n"
 "Language: it\n"
@@ -702,9 +702,8 @@ msgid "Background"
 msgstr "Sfondo"
 
 #: src/app/settings/theme.tsx
-#, fuzzy
 msgid "Background from artwork"
-msgstr "Sfondo"
+msgstr "Sfondo dalla copertina"
 
 #: src/lib/input/keys.ts
 msgid "Backspace"
@@ -1817,11 +1816,11 @@ msgstr "Dai questo codice a chi si occuperà del problema."
 
 #: src/app/settings/theme.tsx
 msgid "Glass panels"
-msgstr ""
+msgstr "Pannelli effetto vetro"
 
 #: src/app/settings/theme.tsx
 msgid "Glass surface"
-msgstr ""
+msgstr "Superficie effetto vetro"
 
 #: src/app/settings/apps.tsx
 msgid "GLSL shader files for the built-in mpv, applied in name order to what plays. Heavy ones can make video stutter."
@@ -2340,7 +2339,7 @@ msgstr "Tasto menu"
 
 #: src/app/settings/theme.tsx
 msgid "Menus, lists, fields and cards over the artwork sit on the glass surface instead of its colour. Slower devices can feel the extra drawing."
-msgstr ""
+msgstr "Menu, elenchi, campi e schede sopra la copertina poggiano su una superficie in vetro anziché sul suo colore. I dispositivi meno potenti potrebbero risentire dell'elaborazione grafica aggiuntiva."
 
 #: src/app/settings/interface.tsx
 msgid "Merge continue watching and next up"
@@ -2804,9 +2803,8 @@ msgid "on {relay}"
 msgstr "su {relay}"
 
 #: src/app/settings/interface.tsx
-#, fuzzy
 msgid "On home while the hero rotates, and in grids. In a grid, and under a mouse, a card pops out, so the cards beside it stay put."
-msgstr "Mentre il banner in evidenza ruota. Con il mouse una scheda si ingrandisce sempre in primo piano, quindi le schede accanto restano ferme."
+msgstr "Nella schermata home mentre il banner in evidenza ruota, e nelle griglie. In una griglia, e con il mouse, una scheda si ingrandisce in primo piano, quindi le schede accanto restano ferme."
 
 #: src/lib/discord.ts
 msgid "On the calendar"
@@ -4692,7 +4690,7 @@ msgstr "Il lettore dell'app e le sue opzioni, come l'avvio dei video in modalit�
 
 #: src/app/settings/theme.tsx
 msgid "The artwork of the title you're on, blurred and darkened, behind the pages and the version list."
-msgstr ""
+msgstr "La copertina del titolo che hai aperto, sfocata e reso più scuro, dietro le pagine e l'elenco delle versioni."
 
 #: src/app/settings/account.tsx
 msgid "The device is signed in"
@@ -5189,9 +5187,8 @@ msgid "Up next: {upNext}"
 msgstr "Prossimo episodio: {upNext}"
 
 #: src/app/settings/interface.tsx
-#, fuzzy
 msgid "Up to {MAX_FEATURED}, mixed together. Left empty, your first movie and show libraries are featured."
-msgstr "Fino a {MAX_FEATURED}, combinati insieme. Se lasciato vuoto, verranno messi in evidenza i tuoi primi cataloghi di film e serie."
+msgstr "Fino a {MAX_FEATURED}, combinati insieme. Se lasciato vuoto, verranno messi in evidenza le tue prime librerie di film e serie."
 
 #: src/lib/hosts/shell/index.ts
 msgid "Up to date."
@@ -5460,9 +5457,8 @@ msgid "What the app did each day, kept for a week."
 msgstr "Cronologia delle attività dell'app degli ultimi 7 giorni."
 
 #: src/app/settings/theme.tsx
-#, fuzzy
 msgid "What the navigation, and glass panels over the artwork, sit on: the app's own colour, or glass that shows the page through it. Liquid glass also bends what's behind the navigation's edges, which costs more on a slow device."
-msgstr "Lo sfondo su cui poggia la barra di navigazione: il colore dell'app o un effetto vetro che mostra la pagina in trasparenza. Liquid glass distorce anche i contenuti dietro i bordi, richiedendo più risorse sui dispositivi più lenti."
+msgstr "Dove poggiano la navigazione e i pannelli effetto vetro sopra la copertina: il colore dell'app oppure un vetro che lascia intravedere la pagina. Liquid Glass distorce anche ciò che sta dietro i bordi della navigazione, con un costo maggiore sui dispositivi meno performanti."
 
 #: src/features/party/chat.tsx
 msgid "What the others say shows here."

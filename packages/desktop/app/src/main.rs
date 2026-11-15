@@ -40,6 +40,8 @@ pub enum UserEvent {
     ToggleMaximize,
     WindowState,
     WindowButtons(bool),
+    #[cfg(target_os = "macos")]
+    FullscreenLeft,
     Link(String),
     LinksReady,
     ChoosePlayer(external::Kind),

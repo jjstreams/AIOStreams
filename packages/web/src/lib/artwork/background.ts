@@ -118,6 +118,23 @@ export const subscribeWash = (listener: () => void) => {
   return () => void listeners.delete(listener);
 };
 export const currentWash = () => frame;
+
+export function washCopy(): HTMLElement | null {
+  if (!frame) return null;
+  const layer = document.createElement('div');
+  layer.dataset.ui = 'art-wash';
+  layer.style.cssText = 'pointer-events: none; overflow: hidden';
+  layer.style.setProperty('--art-tint', frame.tint);
+  const canvas = document.createElement('canvas');
+  canvas.width = WASH_W;
+  canvas.height = WASH_H;
+  canvas.style.cssText = 'width: 100%; height: 100%; object-fit: cover';
+  canvas
+    .getContext('2d', { alpha: false })
+    ?.drawImage(frame.image, 0, 0, WASH_W, WASH_H);
+  layer.append(canvas);
+  return layer;
+}
 export const useWashShown = () =>
   React.useSyncExternalStore(subscribeWash, () => frame !== null);
 
