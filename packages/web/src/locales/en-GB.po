@@ -488,8 +488,8 @@ msgid "Added to {name}"
 msgstr "Added to {name}"
 
 #: src/app/settings/account.tsx
-msgid "Addons, catalogs and users are set up on the configuration page."
-msgstr "Addons, catalogs and users are set up on the configuration page."
+msgid "Addons, catalogs and profiles are set up on the configuration page."
+msgstr "Addons, catalogs and profiles are set up on the configuration page."
 
 #: src/app/settings/about.tsx
 msgid "Address"
@@ -866,6 +866,7 @@ msgid "Calendar"
 msgstr "Calendar"
 
 #: src/app/servers/page.tsx
+#: src/app/sign-in/page.tsx
 msgid "Can’t reach"
 msgstr "Can’t reach"
 
@@ -1722,6 +1723,7 @@ msgid "Every {list} at {time}"
 msgstr "Every {list} at {time}"
 
 #: src/app/history/page.tsx
+#: src/app/settings/page.tsx
 msgid "Everyone"
 msgstr "Everyone"
 
@@ -2267,6 +2269,7 @@ msgid "Keeps the video playing in a small window when you leave the app."
 msgstr "Keeps the video playing in a small window when you leave the app."
 
 #: src/app/settings/_components/common.tsx
+#: src/app/settings/_components/settings-card.tsx
 msgid "Kept on this device."
 msgstr "Kept on this device."
 
@@ -2323,6 +2326,10 @@ msgstr "Leave {from} to add {adding}?"
 #: src/app.tsx
 msgid "Leave {from} to open this on {target}?"
 msgstr "Leave {from} to open this on {target}?"
+
+#: src/app/servers/page.tsx
+msgid "Leave off the profile picker"
+msgstr "Leave off the profile picker"
 
 #: src/features/party/in-party.tsx
 msgid "Leave the party"
@@ -2445,6 +2452,10 @@ msgstr "Magenta"
 #: src/app/settings/audio.tsx
 msgid "Main"
 msgstr "Main"
+
+#: src/app.tsx
+msgid "Manage servers"
+msgstr "Manage servers"
 
 #: src/features/versions/external-prompt.tsx
 msgid "Mark as watched"
@@ -2634,8 +2645,8 @@ msgid "Navigation"
 msgstr "Navigation"
 
 #: src/app/sign-in/page.tsx
-msgid "Needed to switch to this user."
-msgstr "Needed to switch to this user."
+msgid "Needed to switch to this profile."
+msgstr "Needed to switch to this profile."
 
 #: src/app/downloads/page.tsx
 msgid "Needs attention"
@@ -3172,8 +3183,8 @@ msgid "Other pages, such as settings"
 msgstr "Other pages, such as settings"
 
 #: src/app/sign-in/page.tsx
-msgid "Other user"
-msgstr "Other user"
+msgid "Other profile"
+msgstr "Other profile"
 
 #: src/app/player/page.tsx
 msgid "Other versions"
@@ -3297,10 +3308,6 @@ msgstr "Paused on {name}, {at} in"
 #: src/app/settings/playback.tsx
 msgid "Pauses and asks before the next episode once this many have played in a row without a key, click or button press."
 msgstr "Pauses and asks before the next episode once this many have played in a row without a key, click or button press."
-
-#: src/app/settings/player.tsx
-msgid "Pausing, playing or skipping with a remote or the keyboard brings the controls up, for a moment after a skip. Turned off, only a brief icon shows."
-msgstr "Pausing, playing or skipping with a remote or the keyboard brings the controls up, for a moment after a skip. Turned off, only a brief icon shows."
 
 #: src/app/search/page.tsx
 msgid "People"
@@ -3672,6 +3679,10 @@ msgstr "Previous trailer"
 #: src/components/media/people.tsx
 msgid "Producer"
 msgstr "Producer"
+
+#: src/app/history/page.tsx
+msgid "Profile"
+msgstr "Profile"
 
 #: src/app/settings/_components/shortcut-settings.tsx
 msgid "Puts every key back the way it came."
@@ -4086,11 +4097,15 @@ msgstr "Saved"
 msgid "Saved to {folder}"
 msgstr "Saved to {folder}"
 
-#: src/app/settings/_components/common.tsx
+#: src/app/settings/_components/settings-card.tsx
+msgid "Saved to this profile, on every device it signs in on."
+msgstr "Saved to this profile, on every device it signs in on."
+
+#: src/app/settings/_components/settings-card.tsx
 msgid "Saved to your account, so it follows you to every device."
 msgstr "Saved to your account, so it follows you to every device."
 
-#: src/app/settings/_components/common.tsx
+#: src/app/settings/_components/settings-card.tsx
 msgid "Saved to your account, so your other devices and Jellyfin apps use it too."
 msgstr "Saved to your account, so your other devices and Jellyfin apps use it too."
 
@@ -4246,6 +4261,10 @@ msgstr "Set by hand"
 msgid "Settings"
 msgstr "Settings"
 
+#: src/app/settings/page.tsx
+msgid "Settings for"
+msgstr "Settings for"
+
 #: src/app/settings/player.tsx
 msgid "Shader files (.wgsl) for the WebGPU engine, applied in name order to what plays. They stay in this browser. Heavy ones can make video stutter."
 msgstr "Shader files (.wgsl) for the WebGPU engine, applied in name order to what plays. They stay in this browser. Heavy ones can make video stutter."
@@ -4295,6 +4314,10 @@ msgstr "Show in folder"
 msgid "Show messages over the video"
 msgstr "Show messages over the video"
 
+#: src/app/servers/page.tsx
+msgid "Show on the profile picker"
+msgstr "Show on the profile picker"
+
 #: src/app/settings/playback.tsx
 msgid "Show reactions over the video"
 msgstr "Show reactions over the video"
@@ -4310,10 +4333,6 @@ msgstr "Show subtitles earlier"
 #: src/features/player/options.tsx
 msgid "Show subtitles later"
 msgstr "Show subtitles later"
-
-#: src/app/settings/player.tsx
-msgid "Show the controls on pause and skip"
-msgstr "Show the controls on pause and skip"
 
 #: src/app/settings/playback.tsx
 msgid "Show the prompt"
@@ -4777,15 +4796,15 @@ msgstr "Swipe up or down on the right for volume"
 msgid "Switch"
 msgstr "Switch"
 
-#: src/app.tsx
-msgid "Switch server"
-msgstr "Switch server"
-
 #: src/app/settings/account.tsx
 #: src/components/media/no-catalogs.tsx
 #: src/components/shell/layout.tsx
-msgid "Switch user"
-msgstr "Switch user"
+msgid "Switch profile"
+msgstr "Switch profile"
+
+#: src/app.tsx
+msgid "Switch server"
+msgstr "Switch server"
 
 #: src/app/settings/player.tsx
 msgid "Switches the TV to a refresh rate that suits each video, so motion plays smoothly, and back when you stop. The screen goes blank for a moment as it switches."
@@ -4972,6 +4991,14 @@ msgstr "The app's player and its options, such as starting videos in landscape."
 #: src/app/settings/theme.tsx
 msgid "The artwork of the title you're on, blurred and darkened, behind these pages. The version list shows it with title pages."
 msgstr "The artwork of the title you're on, blurred and darkened, behind these pages. The version list shows it with title pages."
+
+#: src/app/settings/_components/settings-card.tsx
+msgid "The default for every device. A device that changes it keeps its own."
+msgstr "The default for every device. A device that changes it keeps its own."
+
+#: src/app/settings/_components/settings-card.tsx
+msgid "The default for every profile. A profile that changes it keeps its own."
+msgstr "The default for every profile. A profile that changes it keeps its own."
 
 #: src/app/settings/account.tsx
 msgid "The device is signed in"
@@ -5226,6 +5253,10 @@ msgstr "This isn't a .wgsl pass file."
 msgid "This item was not found"
 msgstr "This item was not found"
 
+#: src/app/sign-in/page.tsx
+msgid "This profile has a PIN."
+msgstr "This profile has a PIN."
+
 #: src/features/downloads/download-button.tsx
 msgid "This season"
 msgstr "This season"
@@ -5238,7 +5269,7 @@ msgstr "This server"
 msgid "This server can't list what you've watched."
 msgstr "This server can't list what you've watched."
 
-#: src/app/settings/_components/common.tsx
+#: src/app/settings/_components/settings-card.tsx
 msgid "This server doesn't let your account change these."
 msgstr "This server doesn't let your account change these."
 
@@ -5273,10 +5304,6 @@ msgstr "This trailer didn't play: {failure}"
 #: src/app/trailer/page.tsx
 msgid "This trailer is gone."
 msgstr "This trailer is gone."
-
-#: src/app/sign-in/page.tsx
-msgid "This user has a PIN."
-msgstr "This user has a PIN."
 
 #: src/app/player/page.tsx
 msgid "This version is no longer available."
@@ -5555,10 +5582,6 @@ msgstr "Use your user name and PIN, or the configuration’s UUID and its passwo
 msgid "Used when an episode has no credits marked."
 msgstr "Used when an episode has no credits marked."
 
-#: src/app/history/page.tsx
-msgid "User"
-msgstr "User"
-
 #: src/app/sign-in/page.tsx
 msgid "User name"
 msgstr "User name"
@@ -5697,8 +5720,8 @@ msgid "Watch along"
 msgstr "Watch along"
 
 #: src/app/settings/account.tsx
-msgid "Watch as someone else on this configuration. A user with a PIN needs it again after switching away."
-msgstr "Watch as someone else on this configuration. A user with a PIN needs it again after switching away."
+msgid "Watch as someone else on this configuration. A profile with a PIN needs it again after switching away."
+msgstr "Watch as someone else on this configuration. A profile with a PIN needs it again after switching away."
 
 #: src/app/settings/playback.tsx
 msgid "Watch parties"
@@ -5791,8 +5814,8 @@ msgid "What you can send from a party's chat."
 msgstr "What you can send from a party's chat."
 
 #: src/app/settings/apps.tsx
-msgid "What your Discord profile shows. Kept on this device."
-msgstr "What your Discord profile shows. Kept on this device."
+msgid "What your Discord profile shows."
+msgstr "What your Discord profile shows."
 
 #: src/app/settings/audio.tsx
 msgid "What your speakers or receiver take. Surround sound with more is mixed down, with its dialogue kept in."
@@ -5942,6 +5965,7 @@ msgstr "Yellow"
 msgid "Yesterday"
 msgstr "Yesterday"
 
+#: src/app/settings/page.tsx
 #: src/components/shell/nav/account.tsx
 #: src/components/shell/nav/corner-menu.tsx
 #: src/components/shell/nav/mobile-nav.tsx

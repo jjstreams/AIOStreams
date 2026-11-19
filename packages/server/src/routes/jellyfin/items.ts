@@ -53,7 +53,6 @@ import {
   showEpisodesOf,
   withPlayedCounts,
   isMemoFresh,
-  JellyfinRepository,
   resolveByItem,
   resolveByMediaSource,
   stripInternal,
@@ -87,6 +86,7 @@ import {
   type UserItemDataDto,
 } from '@aiostreams/core';
 import { stremioStreamRateLimiter } from '../../middlewares/ratelimit.js';
+import { storedPreferences } from './preferences.js';
 import { StaticFiles } from '../../utils/static-errors.js';
 import {
   ANDROID_PLAYER_CLIENT,
@@ -380,7 +380,7 @@ export async function userViews(
 }
 
 export function playlistOwner(ctx: JellyfinRequestContext): PlaylistOwner {
-  return { uuid: ctx.uuid, persona: ctx.persona?.id ?? '' };
+  return { uuid: ctx.uuid, profile: ctx.profile.id };
 }
 
 /** A playlist, pictured by its first title, or that episode's show. */
@@ -921,9 +921,7 @@ export function nothingToPlayPath(
 export async function trackPreferences(
   ctx: JellyfinRequestContext
 ): Promise<TrackPreferences> {
-  return trackPreferencesFrom(
-    await JellyfinRepository.getUserConfiguration(ctx.watch)
-  );
+  return trackPreferencesFrom(await storedPreferences(ctx.watch));
 }
 
 /** MediaSources for an item, from a memo; the first source carries `firstId`. */
@@ -989,7 +987,7 @@ function rememberMarker(ctx: JellyfinRequestContext, itemId: string): string {
     uuid: ctx.uuid,
     encryptedPassword: ctx.encryptedPassword,
     itemId,
-    persona: ctx.persona?.id,
+    profile: ctx.profile.id || undefined,
   }).catch(() => undefined);
   return marker;
 }

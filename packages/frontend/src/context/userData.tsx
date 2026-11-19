@@ -9,6 +9,7 @@ import {
   DEFAULT_FAILOVER_CONTENT_TYPES,
   DEFAULT_FAILOVER_PARALLEL,
 } from '../../../core/src/utils/constants';
+import { migrateProfiles } from '../../../core/src/utils/profiles';
 import { useStatus } from './status';
 import { computeUserDataDiff } from '../utils/diff/userData';
 import {
@@ -61,6 +62,8 @@ export function applyMigrations(config: any): UserData {
         break;
     }
   }
+
+  migrateProfiles(config);
 
   if (typeof config.digitalReleaseFilter === 'boolean') {
     const oldValue = config.digitalReleaseFilter;
@@ -394,11 +397,11 @@ export function removeInvalidPresetReferences(config: UserData) {
   }
   // An emptied list stays None: automatic could take trackers others picked.
   // A child config's own presets leave out its parent's.
-  for (const user of config.parentConfig?.uuid
+  for (const profile of config.parentConfig?.uuid
     ? []
-    : [config.jellyfin?.primary, ...(config.jellyfin?.personas ?? [])]) {
-    if (user?.trackers) {
-      user.trackers = user.trackers.filter((id) =>
+    : (config.profiles ?? [])) {
+    if (profile.trackers) {
+      profile.trackers = profile.trackers.filter((id) =>
         existingPresetIds?.includes(id)
       );
     }
@@ -567,10 +570,7 @@ function applyStatusSettings(
       proxy?.id ??
       defaults?.id ??
       (fillDefaults ? 'builtin' : undefined)) as
-      | 'builtin'
-      | 'mediaflow'
-      | 'stremthru'
-      | undefined,
+      'builtin' | 'mediaflow' | 'stremthru' | undefined,
     url: forced.url ?? proxy?.url ?? defaults?.url ?? undefined,
     publicUrl:
       forced.publicUrl ?? proxy?.publicUrl ?? defaults?.publicUrl ?? undefined,
@@ -650,6 +650,9 @@ interface UserDataContextType {
   setEncryptedPassword: (encryptedPassword: string | null) => void;
   /** Edits past this point count as a draft; matching it again clears one. */
   setBaseline: (data: UserData) => void;
+  unsaved: boolean;
+  /** The top-level fields that differ from the baseline. */
+  changedFields: readonly string[];
   /** Null unless it belongs to the configuration currently held. */
   pendingDraft: Draft | null;
   restoreDraft: () => void;
@@ -742,10 +745,21 @@ export function UserDataProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uuid]);
 
+  const [unsaved, setUnsaved] = React.useState(false);
+  const [changedFields, setChangedFields] = React.useState<readonly string[]>(
+    []
+  );
   React.useEffect(() => {
     if (!baselineReady) return;
     const handle = setTimeout(() => {
-      if (sameConfig(userData, baselineRef.current)) {
+      const { diffs } = computeUserDataDiff(userData, baselineRef.current);
+      const same = diffs.length === 0;
+      setUnsaved(!same);
+      const fields = [...new Set(diffs.map((d) => d.path[0]))].sort();
+      setChangedFields((prev) =>
+        prev.join() === fields.join() ? prev : fields
+      );
+      if (same) {
         clearDrafts(uuid);
         return;
       }
@@ -817,6 +831,8 @@ export function UserDataProvider({ children }: { children: React.ReactNode }) {
       encryptedPassword,
       setEncryptedPassword,
       setBaseline,
+      unsaved,
+      changedFields,
       pendingDraft: applicableDraft,
       restoreDraft,
       discardDraft,
@@ -829,6 +845,8 @@ export function UserDataProvider({ children }: { children: React.ReactNode }) {
       password,
       encryptedPassword,
       setBaseline,
+      unsaved,
+      changedFields,
       applicableDraft,
       restoreDraft,
       discardDraft,

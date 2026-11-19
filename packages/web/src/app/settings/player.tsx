@@ -55,7 +55,7 @@ import { mayConvert, qualityOptions } from '@/lib/playback/quality';
 import { canMinimise } from '@/lib/playback/session';
 import { SettingsCard, SettingsRow } from './_components/settings-card';
 import { GestureSettings } from './_components/gesture-settings';
-import { onDevice, seconds, ShaderFilesRow } from './_components/common';
+import { seconds, ShaderFilesRow } from './_components/common';
 
 const builtIn = (player: string) =>
   !LAUNCHED_PLAYERS.some((p) => p.id === player) &&
@@ -213,7 +213,7 @@ function PlayerCard() {
     returnUrl,
   } = LINK_TOKENS;
   return (
-    <SettingsCard name="player" title={t`Player`} description={onDevice()}>
+    <SettingsCard name="player" title={t`Player`} holds="device">
       <Select
         label={t`Play versions in`}
         help={help}
@@ -324,7 +324,7 @@ function LeavingCard() {
     <SettingsCard
       name="leaving-the-app"
       title={t`Leaving the app`}
-      description={onDevice()}
+      holds="device"
     >
       {canPip && (
         <Switch
@@ -356,11 +356,8 @@ function ControlsCard() {
   const [holdRate, setHoldRate] = useSetting(settings.controls.holdRate);
   const [thumbnails, setThumbnails] = useSetting(settings.controls.thumbnails);
   const [clock, setClock] = useSetting(settings.controls.clock);
-  const [showOnPauseAndSkip, setShowOnPauseAndSkip] = useSetting(
-    settings.controls.showOnPauseAndSkip
-  );
   return (
-    <SettingsCard name="controls" title={t`Controls`} description={onDevice()}>
+    <SettingsCard name="controls" title={t`Controls`} holds="device">
       <Select
         label={t`Skip length`}
         help={t`How far the skip buttons, double taps and the arrow keys jump.`}
@@ -394,13 +391,6 @@ function ControlsCard() {
         onValueChange={(v) => setHoldRate(Number(v))}
       />
       {!currentHost().tv && <GestureSettings />}
-      <Switch
-        side="right"
-        label={t`Show the controls on pause and skip`}
-        help={t`Pausing, playing or skipping with a remote or the keyboard brings the controls up, for a moment after a skip. Turned off, only a brief icon shows.`}
-        value={showOnPauseAndSkip}
-        onValueChange={setShowOnPauseAndSkip}
-      />
       <Switch
         side="right"
         label={t`Show the time`}
@@ -450,7 +440,7 @@ function VideoCard() {
     engine !== 'browser';
   if (!shell && !webGpu) return null;
   return (
-    <SettingsCard name="video" title={t`Video`} description={onDevice()}>
+    <SettingsCard name="video" title={t`Video`} holds="device">
       {decoding && (
         <Switch
           side="right"
