@@ -5,7 +5,7 @@ import {
   createLogger,
   decodeProxyToken,
   ProxyDataSchema,
-  resolveOverrideHeaders,
+  resolveHeaderOverride,
   appConfig,
   getTimeTakenSincePoint,
   makeUrlLogSafe,
@@ -215,7 +215,7 @@ function buildOutboundHeaders(
     )
   );
   for (const [name, value] of Object.entries(
-    resolveOverrideHeaders(urlObj, context)
+    resolveHeaderOverride(urlObj, context)?.headers ?? {}
   )) {
     headers[name.toLowerCase()] = value;
   }
